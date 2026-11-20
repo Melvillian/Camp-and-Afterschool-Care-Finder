@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -103,4 +103,34 @@ test('seasonYear prefers the programYear field, then the dates', () => {
   assert.equal(seasonYear({ programYear: 2027 }), '2027');
   assert.equal(seasonYear({ programYear: '', startDate: '', endDate: '' }), null);
   assert.equal(seasonYear({}), null);
+});
+
+const T2 = '2027-01-20';
+const O = (orgId, early, opens, notes = '') => ({ orgId, name: orgId.toUpperCase(), website: 'https://example.org/' + orgId,
+  registrationOpensEarly: early, registrationOpens: opens, registrationNotes: notes });
+
+test('registrationList picks, labels and sorts', () => {
+  const list = registrationList([
+    O('later', '', '2027-02-11'),
+    O('lottery', '2027-01-08', '2027-02-03', 'Lottery Jan 8\u201312'),   // early passed, general upcoming
+    O('soon', '2027-01-26', '2027-02-09'),
+    O('longago', '', '2026-12-01'),                                 // more than 30 days ago
+    O('recent', '', '2027-01-05'),                                  // opened 15 days ago
+    O('blank', '', ''),
+    O('bad', '', '2/4/2027'),
+  ], T2);
+  assert.deepEqual(list.map(x => [x.orgId, x.sortDate, x.openNow]), [
+    ['recent', '2027-01-05', true],
+    ['soon', '2027-01-26', false],
+    ['lottery', '2027-02-03', true],
+    ['later', '2027-02-11', false],
+  ]);
+  assert.equal(list[2].notes, 'Lottery Jan 8\u201312');
+});
+test('registrationList: only an early date', () => {
+  assert.deepEqual(registrationList([O('e', '2027-01-25', '')], T2).map(x => [x.sortDate, x.openNow]), [['2027-01-25', false]]);
+});
+test('registrationList: boundary is 30 days inclusive', () => {
+  assert.equal(registrationList([O('a', '', '2026-12-21')], T2).length, 1);
+  assert.equal(registrationList([O('a', '', '2026-12-20')], T2).length, 0);
 });

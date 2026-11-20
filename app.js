@@ -1143,6 +1143,43 @@ function filterCampsByDate(programs, selectedDateString) {
 
 
 // ===== Boot =====
+function formatRegDate(iso) {
+  const [, m, d] = iso.split('-').map(Number);
+  return `${MONTH_ABBR[m - 1]} ${d}`;
+}
+
+function renderRegSoon() {
+  const el = document.getElementById('regSoon');
+  if (!el) return;
+  const orgs = typeof ORGANIZATIONS !== 'undefined' ? ORGANIZATIONS : [];
+  const list = CampLib.registrationList(orgs, TODAY);
+  if (!list.length) return;
+  const esc = CampLib.escapeHtml;
+  const LIMIT = 8;
+  const row = (r, i) => {
+    const site = CampLib.safeUrl(r.website);
+    const name = site
+      ? `<a href="${esc(site)}" target="_blank" rel="noopener noreferrer">${esc(r.name)}</a>`
+      : esc(r.name);
+    const dates = [
+      r.openNow ? '<span class="reg-soon-open">Open now</span>' : '',
+      r.early ? `<span>Early: ${esc(formatRegDate(r.early))}</span>` : '',
+      r.opens ? `<span>Opens ${esc(formatRegDate(r.opens))}</span>` : '',
+    ].join('');
+    const note = r.notes ? `<span class="reg-soon-note">${esc(r.notes)}</span>` : '';
+    return `<li class="reg-soon-item${i >= LIMIT ? ' hidden' : ''}"><strong>${name}</strong>${dates}${note}</li>`;
+  };
+  el.innerHTML = `<h2 class="reg-soon-title">Registration opening soon</h2>
+    <ul class="reg-soon-list">${list.map(row).join('')}</ul>
+    ${list.length > LIMIT ? `<button type="button" class="reg-soon-more">Show all ${list.length}</button>` : ''}`;
+  const more = el.querySelector('.reg-soon-more');
+  if (more) more.addEventListener('click', () => {
+    el.querySelectorAll('.reg-soon-item.hidden').forEach(li => li.classList.remove('hidden'));
+    more.remove();
+  });
+  el.classList.remove('hidden');
+}
+
 function init() {
   allPrograms = typeof PROGRAMS !== 'undefined' ? PROGRAMS : [];
   visibility = CampLib.defaultVisibility(categoryPrograms(), TODAY);
@@ -1156,6 +1193,7 @@ function init() {
   populateFiltersForCategory();
   update();
   renderExportPanel();
+  renderRegSoon();
   if (location.hash === '#map') switchView('map');
   else if (location.hash === '#calendar') switchView('calendar');
 }

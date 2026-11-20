@@ -428,7 +428,31 @@ const ORGANIZATIONS = [
     "registrationPolicy": "",
     "registrationOpens": "",
     "verifiedDate": "",
-    "notes": ""
+    "notes": "",
+    "registrationOpensEarly": "",
+    "registrationNotes": ""
+  },
+  {
+    "orgId": "reg-org",
+    "name": "Reg Org",
+    "type": "private",
+    "website": "https://example.org/reg",
+    "phone": "",
+    "email": "",
+    "address": "",
+    "city": "Burlington",
+    "county": "Chittenden",
+    "state": "VT",
+    "zip": "",
+    "financialAidAvailable": false,
+    "financialAidNotes": "",
+    "confidence": "confirmed",
+    "registrationPolicy": "",
+    "registrationOpens": "2099-02-04",
+    "verifiedDate": "",
+    "notes": "",
+    "registrationOpensEarly": "2099-01-28",
+    "registrationNotes": "<b>Residents</b> first"
   }
 ];
 

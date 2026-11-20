@@ -111,5 +111,41 @@
     };
   }
 
-  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear };
+  function validIso(v) {
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const d = new Date(v + 'T00:00:00Z');
+    return !isNaN(d) && d.toISOString().slice(0, 10) === v;
+  }
+
+  function shiftIso(iso, days) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Organizations whose registration opens soon, or opened within the last 30 days.
+  // sortDate: the earliest date not yet passed, else the latest date.
+  // openNow: the earliest date is today or earlier.
+  function registrationList(orgs, todayIso) {
+    const cutoff = shiftIso(todayIso, -30);
+    const out = [];
+    orgs.forEach(o => {
+      const dates = [o.registrationOpensEarly, o.registrationOpens].filter(validIso).sort();
+      if (!dates.some(d => d >= cutoff)) return;
+      const upcoming = dates.find(d => d >= todayIso);
+      out.push({
+        orgId: o.orgId,
+        name: o.name,
+        website: o.website,
+        sortDate: upcoming || dates[dates.length - 1],
+        early: validIso(o.registrationOpensEarly) ? o.registrationOpensEarly : '',
+        opens: validIso(o.registrationOpens) ? o.registrationOpens : '',
+        notes: o.registrationNotes || '',
+        openNow: dates[0] <= todayIso,
+      });
+    });
+    return out.sort((a, b) => a.sortDate < b.sortDate ? -1 : a.sortDate > b.sortDate ? 1 : String(a.name).localeCompare(String(b.name)));
+  }
+
+  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList };
 });
