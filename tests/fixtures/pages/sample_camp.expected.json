@@ -1,0 +1,43 @@
+{
+  "_about": "Mechanical assertions for an extraction of sample_camp.html. 'rows' are the staged rows for org_id 'tumblestone-brook'; 'org_facts' is the row written by `staging.py add-org`. A row 'match' selects a row by exact start_date. Equality assertions compare exact strings; 'blank' means the empty string. Times in this project are zero-padded 'HH:MM AM'.",
+  "page_text_normalisation": "Page text = the HTML with <script>, <style> and tags removed, character entities decoded, and runs of whitespace collapsed to one space, trimmed. A source_quote is verbatim when it is a substring of that text after the same whitespace collapsing.",
+  "org_id": "tumblestone-brook",
+  "season": 2027,
+  "expected_row_count": 3,
+  "rows": [
+    {
+      "match": {"start_date": "2027-06-28"},
+      "equals": {"end_date": "2027-07-02", "start_time": "09:00 AM", "cost_raw": "$285 per week", "age_min": "7", "age_max": "12"},
+      "blank": ["end_time"]
+    },
+    {
+      "match": {"start_date": "2027-07-12"},
+      "equals": {"end_date": "2027-07-16", "start_time": "09:00 AM", "cost_raw": "$285 per week", "age_min": "7", "age_max": "12"},
+      "blank": ["end_time"]
+    },
+    {
+      "match": {"start_date": "2027-07-26"},
+      "equals": {"end_date": "2027-07-30", "start_time": "09:00 AM", "cost_raw": "$340 per week (includes canoe program)", "age_min": "7", "age_max": "12"},
+      "blank": ["end_time"]
+    }
+  ],
+  "every_row": {
+    "blank": ["end_time"],
+    "no_date_in_year": {"columns": ["start_date", "end_date"], "year": 2026},
+    "not_blank": ["program_name", "description", "source_url", "source_quote"],
+    "source_quote_is_verbatim_page_text": true,
+    "source_quote_max_length": 200,
+    "description_not_copied": {"max_shared_sentence": 0, "note": "No sentence of the description (split on '.', '!' or '?', trimmed, case-insensitive) may equal a sentence of the page text, and no run of 8 or more consecutive words may appear in both."},
+    "activities_only_from_canonical_list": true
+  },
+  "org_facts": {
+    "equals": {"registration_opens": "2027-02-03", "registration_opens_early": "2027-01-27"},
+    "note": "financial_aid_available and financial_aid_notes must be blank: the page says nothing about aid."
+  },
+  "must_not": [
+    "Any end_time value anywhere (the page gives no clock time for the end of the day; 'mid-afternoon' is not a time).",
+    "Any row built from the 2026 testimonial (June 29 - July 3, 2026).",
+    "A start_date or end_date taken or shifted from a 2026 date."
+  ],
+  "staging_check_passes": true
+}

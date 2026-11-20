@@ -1,4 +1,5 @@
-.claude/
+.claude/*
+!.claude/skills/
 __pycache__/
 data/staging/*/sheet/_to_paste_*.csv
 data/staging/*/sheet/_changes.txt
