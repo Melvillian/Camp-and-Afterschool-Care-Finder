@@ -7,6 +7,7 @@ Set CHROME to override the browser path.
 import functools
 import http.server
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "data.fixture.js"
 MAC_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 failures = []
-_state = {"port": None, "chrome": None}
+_state = {"port": None, "chrome": None, "site": None}
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -47,8 +48,16 @@ def check(name, condition):
         failures.append(name)
 
 
-def dump_dom(path):
-    """Rendered HTML of http://127.0.0.1:<port>/<path>."""
+def dump_dom(path, drop_uids=()):
+    """Rendered HTML of http://127.0.0.1:<port>/<path>.
+
+    drop_uids: programs to remove from the served data.js before loading.
+    """
+    data_js = Path(_state["site"]) / "data.js"
+    text = FIXTURE.read_text()
+    for uid in drop_uids:
+        text = re.sub(r'  \{\n(?:(?!\n  \}).)*?"uid": "%s".*?\n  \},?\n' % re.escape(uid), "", text, flags=re.S)
+    data_js.write_text(text)
     with tempfile.TemporaryDirectory() as profile:
         result = subprocess.run(
             [
@@ -78,6 +87,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as site:
         stage_site(site)
+        _state["site"] = site
         handler = functools.partial(QuietHandler, directory=site)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         _state["port"] = server.server_address[1]
@@ -87,13 +97,20 @@ def main():
             check("afterschool: count line", "of <strong>2</strong> afterschool programs" in dom)
             check("afterschool: two cards", dom.count('class="program-card') == 2)
             dom = dump_dom("index.html")
-            check("camps: count line", "of <strong>4</strong> camps" in dom)
+            check("camps: count line", "of <strong>5</strong> camps" in dom)
             check("xss: no injected img element", '<img src="x"' not in dom)
             check("xss: title untouched", "<title>Summer Camps" in dom)
             check("xss: name shown as text", "&lt;img src=x" in dom)
             check("xss: description shown as text", "&lt;b&gt;bold&lt;/b&gt;" in dom)
             check("unsafe url: no javascript link", 'href="javascript:' not in dom)
             check("safe url: link kept", 'href="https://example.org/camp"' in dom)
+            check("season: superseded row hidden, last-season row shown", "Showing <strong>4</strong> of <strong>5</strong> camps" in dom)
+            check("season: notice text", "Listings marked 2001 are last season's, shown for reference until that camp posts new dates." in dom)
+            check("season: notice visible", 'id="seasonNotice" class="season-notice"' in dom)
+            dom = dump_dom("index.html", drop_uids=["camp-past"])
+            check("season: no last-season rows, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
+            dom = dump_dom("afterschool.html")
+            check("season: undated category, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
         finally:
             server.shutdown()
 

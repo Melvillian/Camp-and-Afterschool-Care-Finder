@@ -13,10 +13,11 @@ let exportSelectionOrder = [];
 const TODAY = new Date().toISOString().slice(0, 10);
 
 function isPast(p) {
-  if (p.endDate) return p.endDate < TODAY;
-  if (p.startDate) return p.startDate < TODAY;
-  return false;
+  return CampLib.isPast(p, TODAY);
 }
+
+// uid -> 'current' | 'lastSeason' | 'hidden', computed once in init()
+let visibility = new Map();
 
 function programYear(p) {
   const d = p.endDate || p.startDate;
@@ -39,7 +40,7 @@ let activeFilters = {
   county: '',
   stars: '',
   status: '',
-  data: '',
+  date: '',
   showPast: false
 };
 
@@ -75,6 +76,7 @@ const groupStatus = document.getElementById('groupStatus');
 
 const cardsGrid = document.getElementById('cardsGrid');
 const resultsCount = document.getElementById('resultsCount');
+const seasonNotice = document.getElementById('seasonNotice');
 const noResults = document.getElementById('noResults');
 const noResultsTitle = document.getElementById('noResultsTitle');
 const noResultsHint = document.getElementById('noResultsHint');
@@ -325,7 +327,7 @@ function applyFilters() {
   const isCamp = activeCategory === 'camp';
 
   let results = categoryPrograms().filter(p => {
-    if (!activeFilters.showPast && isPast(p)) return false;
+    if (!activeFilters.showPast && visibility.get(p.uid) === 'hidden') return false;
 
     if (search) {
       const haystack = [
@@ -575,7 +577,7 @@ function renderCards(programs) {
       ? '<span class="free-badge">Free (Federally Funded)</span>'
       : (!p.cost || p.cost === 0)
         ? '<span class="free-badge">Contact for pricing</span>'
-        : `<span>${formatCost(p.cost, p.costPeriod)}</span>`;
+        : `<span>${CampLib.escapeHtml(formatCost(p.cost, p.costPeriod))}</span>`;
 
     const scholarshipHtml = p.scholarshipAvailable
       ? '<span class="scholarship-badge">Aid Available</span>'
@@ -1008,7 +1010,7 @@ function clearAllFilters() {
     county: '',
     stars: '',
     status: '',
-    data: '',
+    date: '',
     showPast: false
   };
 
@@ -1147,6 +1149,12 @@ function filterCampsByDate(programs, selectedDateString) {
 // ===== Boot =====
 function init() {
   allPrograms = typeof PROGRAMS !== 'undefined' ? PROGRAMS : [];
+  visibility = CampLib.defaultVisibility(categoryPrograms(), TODAY);
+  const seasonYear = CampLib.lastSeasonYear(categoryPrograms(), visibility);
+  if (seasonYear) {
+    seasonNotice.textContent = `Listings marked ${seasonYear} are last season's, shown for reference until that camp posts new dates.`;
+    seasonNotice.classList.remove('hidden');
+  }
   applyCategoryUiText();
   updateFilterVisibility();
   populateFiltersForCategory();
