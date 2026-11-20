@@ -52,5 +52,50 @@ class Checking(unittest.TestCase):
         self.assertEqual(s.load(p), [self.row(notes="a, b")])
 
 
+class Robots(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.path = Path(tempfile.mkdtemp()) / "s.csv"
+
+    def rows(self, spec):
+        base = dict.fromkeys(s.COLUMNS, "")
+        return [{**base, "org_id": f"o{i}", "kind": "html", "status_2027": "not_posted",
+                 "listing_url": f"https://{h}/", "robots_ai_optout": v} for i, (h, v) in enumerate(spec)]
+
+    def test_missing_robots_is_false_and_other_failures_are_blank(self):
+        import urllib.error
+        s.save(self.rows([("gone.org", ""), ("down.org", ""), ("bots.org", ""), ("also.org", "")]), self.path)
+
+        def fake_fetch(host):
+            if host == "gone.org":
+                return ""
+            if host == "down.org":
+                raise OSError("timeout")
+            return "User-agent: GPTBot\nDisallow: /"
+        s.robots(self.path, fetch=fake_fetch, sleep=lambda _: None)
+        got = {r["listing_url"]: r["robots_ai_optout"] for r in s.load(self.path)}
+        self.assertEqual(got, {"https://gone.org/": "FALSE", "https://down.org/": "",
+                               "https://bots.org/": "TRUE", "https://also.org/": "TRUE"})
+
+    def test_http_404_and_410_mean_no_robots_file_but_500_is_a_failure(self):
+        import urllib.error
+        from unittest import mock
+        for code, expect in ((404, ""), (410, ""), (500, None)):
+            err = urllib.error.HTTPError("https://x/robots.txt", code, "x", {}, None)
+            with mock.patch.object(s.urllib.request, "urlopen", side_effect=err):
+                if expect is None:
+                    with self.assertRaises(urllib.error.HTTPError):
+                        s.fetch_robots("x")
+                else:
+                    self.assertEqual(s.fetch_robots("x"), expect)
+
+    def test_rerun_skips_rows_already_answered(self):
+        s.save(self.rows([("a.org", "FALSE"), ("b.org", "")]), self.path)
+        asked = []
+        s.robots(self.path, fetch=lambda h: asked.append(h) or "", sleep=lambda _: None)
+        self.assertEqual(asked, ["b.org"])
+        self.assertEqual([r["robots_ai_optout"] for r in s.load(self.path)], ["FALSE", "FALSE"])
+
+
 if __name__ == "__main__":
     unittest.main()

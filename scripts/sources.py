@@ -3,6 +3,7 @@ import csv
 import datetime as dt
 import sys
 import time
+import urllib.error
 import urllib.request
 from collections import Counter
 from pathlib import Path
@@ -127,19 +128,30 @@ def seed(path=SOURCES_CSV) -> int:
 
 
 def fetch_robots(host: str) -> str:
-    """Network: return the host's robots.txt text (raises on failure). Tests replace this."""
+    """Network: return the host's robots.txt text, "" when there is none (404/410).
+
+    Any other failure raises. Tests replace this or urllib.request.urlopen.
+    """
     req = urllib.request.Request(f"https://{host}/robots.txt", headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (404, 410):
+            return ""
+        raise
 
 
 def robots(path=SOURCES_CSV, fetch=fetch_robots, sleep=time.sleep) -> dict[str, str]:
-    """Fill robots_ai_optout per distinct host; return host -> value ('' on failure)."""
+    """Fill blank robots_ai_optout per distinct host; return host -> value ('' on failure).
+
+    Rows that already say TRUE or FALSE are left alone and their hosts are not asked again.
+    """
     rows = load(path)
     results: dict[str, str] = {}
     for row in rows:
         host = urlparse(row["listing_url"]).hostname
-        if not host or host in results:
+        if not host or host in results or row["robots_ai_optout"]:
             continue
         if results:
             sleep(DELAY_SECONDS)
@@ -150,7 +162,7 @@ def robots(path=SOURCES_CSV, fetch=fetch_robots, sleep=time.sleep) -> dict[str, 
             results[host] = ""
     for row in rows:
         host = urlparse(row["listing_url"]).hostname
-        if host:
+        if host and not row["robots_ai_optout"]:
             row["robots_ai_optout"] = results[host]
     save(rows, path)
     return results
