@@ -72,6 +72,19 @@ def warn(msg: str):
     warnings.append(f"  WARN:  {msg}")
 
 
+def check_org_registration(row: dict, label: str) -> list[str]:
+    """Error strings for bad registration_opens / registration_opens_early values."""
+    errors = []
+    opens = (row.get("registration_opens") or "").strip()
+    early = (row.get("registration_opens_early") or "").strip()
+    for col, value in (("registration_opens", opens), ("registration_opens_early", early)):
+        if value and not DATE_RE.match(value):
+            errors.append(f"{label}: {col} '{value}' is not YYYY-MM-DD")
+    if opens and early and DATE_RE.match(opens) and DATE_RE.match(early) and early > opens:
+        errors.append(f"{label}: registration_opens_early {early} is after registration_opens {opens}")
+    return errors
+
+
 def validate_orgs() -> set[str]:
     """Returns set of valid org_ids."""
     valid_ids: set[str] = set()
@@ -130,6 +143,9 @@ def validate_orgs() -> set[str]:
             vdate = (row.get("verified_date") or "").strip()
             if vdate and not DATE_RE.match(vdate):
                 warn(f"{label}: verified_date '{vdate}' is not YYYY-MM-DD")
+
+            for message in check_org_registration(row, label):
+                err(message)
 
             fin_aid = (row.get("financial_aid_available") or "").strip()
             if fin_aid and fin_aid not in VALID_BOOLS:

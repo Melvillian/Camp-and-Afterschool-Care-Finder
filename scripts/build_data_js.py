@@ -376,6 +376,8 @@ def build_org_obj(org: dict) -> dict:
         "confidence":            org.get("confidence", "likely"),
         "registrationPolicy": org.get("registration_policy", ""),
         "registrationOpens":  org.get("registration_opens", ""),
+        "registrationOpensEarly": org.get("registration_opens_early", ""),
+        "registrationNotes":  org.get("registration_notes", ""),
         "verifiedDate":       org.get("verified_date", ""),
         "notes":              org.get("notes", ""),
     }

@@ -103,7 +103,9 @@ Reload browser
 | `financial_aid_available` | boolean | YES | `TRUE` or `FALSE` |
 | `financial_aid_notes` | text | no | |
 | `registration_policy` | string | no | |
-| `registration_opens` | string | no | |
+| `registration_opens` | date | no | The date general registration opens, `YYYY-MM-DD` |
+| `registration_opens_early` | date | no | The first date anyone can register or apply (residents, members, or the start of a lottery window), `YYYY-MM-DD`. Blank when there is no early date |
+| `registration_notes` | string | no | One line for what the dates do not say, e.g. `Residents Feb 4; non-residents Feb 11` |
 | `confidence` | enum | YES | `confirmed`, `likely`, `inactive` |
 | `verified_date` | date | no | `YYYY-MM-DD` |
 | `notes` | text | no | Internal only |

@@ -82,6 +82,7 @@ def main():
     for page in ["index", "afterschool", "about", "data", "hackathon", "admin"]:
         html = (ROOT / f"{page}.html").read_text(encoding="utf-8")
         check(f"favicon link: {page}", 'rel="icon" href="favicon.svg"' in html)
+    check("org csv has registration columns", "registration_opens,registration_opens_early,registration_notes," in (ROOT / "data/organizations.csv").read_text(encoding="utf-8").splitlines()[0])
     check("favicon file exists", (ROOT / "favicon.svg").is_file())
     check("selector uses CSS.escape", "CSS.escape(uid)" in (ROOT / "app.js").read_text(encoding="utf-8"))
     chrome = find_chrome()
