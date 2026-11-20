@@ -95,6 +95,11 @@ class Collect(unittest.TestCase):
         self.assertEqual([t for t, _ in rejected], ["t3"])
         self.assertIn("program_name", rejected[0][1])
 
+    def test_taken_extra_ids_are_never_reused(self):
+        staged, _, _ = ss.collect_done(self.tasks, self.drafts, [], set(), {"o1", "o2", "o3", "o4"}, 2027,
+                                       "2027-01-10", taken_extra={"o1-added-by-hand-2027"})
+        self.assertEqual([r["program_id"] for r in staged["o1"]], ["o1-camp-2027", "o1-added-by-hand-2027-2"])
+
     def test_already_done_tasks_are_skipped(self):
         staged, _, rejected = self.run_collect(already={"t1", "t2"})
         self.assertEqual((staged, rejected), ({}, []))
@@ -299,6 +304,45 @@ class Pull(PullCase):
         self.assertEqual(code, 0, out)
         self.assertEqual([r["program_id"] for r in staging.load("alpha", 2027, self.root)],
                          ["alpha-camp-2027", "alpha-added-by-hand-2027", "alpha-winter-camp-2027"])
+
+
+class PullSafety(PullCase):
+    def test_skipped_done_task_is_staged_once_fixed(self):
+        bad = (FIXTURES / "tasks.csv").read_text().replace("t-alpha,alpha,Alpha Camp,check_draft", "t-alpha,alpha,Alpha Camp,check draft")
+        code, out = self.pull(fake_download(Tasks=bad))
+        self.assertEqual(code, 0, out)
+        self.assertFalse(staging.staging_path("alpha", 2027, self.root).exists())
+        self.assertIn("t-alpha", [h["task_id"] for h in self.read_csv(self.sheet / "_needs_help.csv")])
+        code, out = self.pull()
+        self.assertEqual([r["program_id"] for r in staging.load("alpha", 2027, self.root)],
+                         ["alpha-camp-2027", "alpha-added-by-hand-2027"])
+
+    def test_duplicate_done_task_id_is_listed(self):
+        dup = (FIXTURES / "tasks.csv").read_text() + "t-alpha,alpha,Alpha Camp,check_draft,10,,,done,Zed,,\n"
+        self.pull(fake_download(Tasks=dup))
+        self.assertIn("t-alpha", [h["task_id"] for h in self.read_csv(self.sheet / "_needs_help.csv")])
+
+    def test_crash_while_staging_leaves_the_previous_snapshot(self):
+        from unittest import mock
+        self.pull()
+        snap = {p.name: p.read_bytes() for p in self.sheet.iterdir()}
+        fixed = (FIXTURES / "drafts.csv").read_text().replace("7/5/2027", "2027-07-05")
+        with mock.patch.object(staging, "save", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.pull(fake_download(Drafts=fixed), today="2027-02-02")
+        self.assertEqual({p.name: p.read_bytes() for p in self.sheet.iterdir()}, snap)
+
+    def test_hand_added_row_never_takes_an_existing_program_id(self):
+        with open(self.root / "data" / "programs.csv", "w", newline="") as f:
+            f.write("program_id,org_id\nalpha-added-by-hand-2027,alpha\n")
+        self.pull()
+        self.assertEqual([r["program_id"] for r in staging.load("alpha", 2027, self.root)],
+                         ["alpha-camp-2027", "alpha-added-by-hand-2027-2"])
+
+    def test_oversized_cell_is_a_message(self):
+        code, out = self.pull(fake_download(Orgs="task_id,org_id\n" + "x" * 200000 + ",a\n"))
+        self.assertEqual(code, 1)
+        self.assertIn("Orgs tab could not be read as CSV", out)
 
 
 class PullStops(PullCase):

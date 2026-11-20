@@ -65,7 +65,10 @@ def parse_tab(text: str, required: list[str], tab: str) -> list[dict]:
     if re.match(r"\s*<(!doctype|html)", text[:200], re.I):
         raise SheetError(f"{tab} tab came back as a web page, not CSV "
                          "(is the Sheet shared so anyone with the link can view it?)")
-    table = [r for r in csv.reader(io.StringIO(text.lstrip("﻿"))) if any(c.strip() for c in r)]
+    try:
+        table = [r for r in csv.reader(io.StringIO(text.lstrip("\ufeff"))) if any(c.strip() for c in r)]
+    except csv.Error as exc:
+        raise SheetError(f"{tab} tab could not be read as CSV: {exc}") from exc
     if not table:
         raise SheetError(f"{tab} tab is empty")
     header = [h.strip() for h in table[0]]
@@ -114,23 +117,31 @@ def diff_drafts(old: list[dict], new: list[dict]) -> tuple[int, int, int]:
             sum(1 for k in before.keys() & after.keys() if before[k] != after[k]))
 
 
-def check_tasks(tasks: list[dict]) -> tuple[list[dict], list[str]]:
-    """Tasks usable by this run, and a message for each one skipped (no id, repeat id, odd status or kind)."""
-    good, messages, seen = [], [], set()
+def check_tasks(tasks: list[dict]) -> tuple[list[dict], list[str], list[tuple[str, str]]]:
+    """Usable tasks, a message for each one skipped, and (task_id, reason) for skipped tasks marked done.
+
+    A skipped task is one with no id, a repeated id, or an odd status or kind.
+    """
+    good, messages, skipped_done, seen = [], [], [], set()
     for t in tasks:
         tid = t.get("task_id", "")
         if not tid:
             messages.append(f"Tasks row for {t.get('org_id') or 'no organization'} has no task_id: skipped")
-        elif tid in seen:
-            messages.append(f"{tid}: task_id appears more than once: later row skipped")
+            continue
+        if tid in seen:
+            reason = "task_id appears more than once: later row skipped"
         elif t.get("status", "") not in TASK_STATUSES:
-            messages.append(f"{tid}: status '{t.get('status', '')}' is not one of {', '.join(sorted(TASK_STATUSES))}: skipped")
+            reason = f"status '{t.get('status', '')}' is not one of {', '.join(sorted(TASK_STATUSES))}: skipped"
         elif t.get("kind", "") not in TASK_KINDS:
-            messages.append(f"{tid}: kind '{t.get('kind', '')}' is not one of {', '.join(sorted(TASK_KINDS))}: skipped")
+            reason = f"kind '{t.get('kind', '')}' is not one of {', '.join(sorted(TASK_KINDS))}: skipped"
         else:
             seen.add(tid)
             good.append(t)
-    return good, messages
+            continue
+        messages.append(f"{tid}: {reason}")
+        if t.get("status") == "done":
+            skipped_done.append((tid, reason))
+    return good, messages, skipped_done
 
 
 def _new_done(tasks: list[dict], already_done: set[str], find_page: bool) -> list[dict]:
@@ -158,9 +169,9 @@ def find_page_urls(tasks, orgs, already_done) -> tuple[dict[str, str], list[tupl
     return urls, rejected
 
 
-def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today):
+def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, taken_extra=()):
     """Turn newly done tasks into (staged rows by org, organization facts, rejected (task_id, reason))."""
-    taken = {d["row_id"] for d in drafts if d.get("row_id")}
+    taken = {d["row_id"] for d in drafts if d.get("row_id")} | set(taken_extra)
     staged: dict[str, list[dict]] = {}
     facts, rejected = [], []
     for task in _new_done(tasks, already_done, False):
@@ -260,7 +271,7 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
         print(f"could not download the Sheet: {exc}")
         return 1
 
-    tasks, task_messages = check_tasks(tabs["Tasks"])
+    tasks, task_messages, skipped_done = check_tasks(tabs["Tasks"])
     drafts, orgs = tabs["Drafts"], tabs["Orgs"]
     old_tasks = _previous(folder, "tasks", TASK_COLUMNS, "Tasks")
     old_drafts = _previous(folder, "drafts", DRAFT_COLUMNS, "Drafts")
@@ -269,7 +280,13 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
 
     with open(root / "data" / "organizations.csv", newline="", encoding="utf-8") as f:
         org_ids = {r["org_id"] for r in csv.DictReader(f)}
-    staged, facts, rejected = collect_done(tasks, drafts, orgs, already_done, org_ids, season, today)
+    programs = root / "data" / "programs.csv"
+    existing_ids = set()
+    if programs.exists():
+        with open(programs, newline="", encoding="utf-8") as f:
+            existing_ids = {r["program_id"] for r in csv.DictReader(f)}
+    staged, facts, rejected = collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, existing_ids)
+    rejected += skipped_done
     urls, find_rejected = find_page_urls(tasks, orgs, already_done)
     rejected += find_rejected
     for task in _new_done(tasks, already_done, True):
@@ -284,10 +301,6 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
     added, removed, edited = diff_drafts(old_drafts, drafts)
     print(f"Drafts rows: {added} added, {removed} removed, {edited} edited")
 
-    for tab_name, name, columns in (("Tasks", "tasks", TASK_COLUMNS), ("Drafts", "drafts", DRAFT_COLUMNS),
-                                    ("Orgs", "orgs", ORG_COLUMNS)):
-        _write_csv(folder / f"{name}.csv", columns, tabs[tab_name])
-    (folder / "snapshot.json").write_text(json.dumps({"pulled_on": today}) + "\n", encoding="utf-8")
     for org, rows in staged.items():
         staging.save(org, season, rows, root)
         print(f"staged {len(rows)} row(s) for {org}")
@@ -297,8 +310,13 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
         _apply_urls(urls, root / "data" / "sources.csv")
         for org, url in urls.items():
             print(f"page for {org}: {url}")
+    # The snapshot goes last: a crash above leaves the old one, so the next pull redoes the work.
     _write_csv(folder / NEEDS_HELP_FILE, ["task_id", "reason"],
                [{"task_id": t, "reason": r} for t, r in rejected])
+    for tab_name, name, columns in (("Tasks", "tasks", TASK_COLUMNS), ("Drafts", "drafts", DRAFT_COLUMNS),
+                                    ("Orgs", "orgs", ORG_COLUMNS)):
+        _write_csv(folder / f"{name}.csv", columns, tabs[tab_name])
+    (folder / "snapshot.json").write_text(json.dumps({"pulled_on": today}) + "\n", encoding="utf-8")
     for tid, reason in rejected:
         print(f"NEEDS HELP {tid}: {reason}")
     return 0
