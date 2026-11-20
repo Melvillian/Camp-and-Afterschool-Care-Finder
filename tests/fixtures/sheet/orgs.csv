@@ -1,0 +1,3 @@
+task_id,org_id,registration_opens,registration_opens_early,registration_notes,financial_aid_available,financial_aid_notes,website
+t-alpha,alpha,2027-03-01,,Opens at noon,,,https://alpha.example.org
+t-gamma,gamma,,,,,,https://gamma.example.org/

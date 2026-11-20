@@ -1,0 +1,4 @@
+task_id,row_id,review,org_id,program_name,program_type,program_year,description,session_type,grades_min,grades_max,age_min,age_max,schedule_type,start_date,end_date,days_of_week,start_time,end_time,pre_after_care,cost_raw,cost_per_week,cost_notes,meals_provided,transportation_provided,transportation_notes,activities,site_address,site_city,site_county,registration_url,registration_opens,registration_opens_early,registration_notes,funding_source,confidence,verified_date,notes,source_url,source_quote
+t-alpha,alpha-camp-2027,ok,alpha,Camp,,,,,,,,,,2027-07-05,2027-07-09,,,,,,,,,,,,,,,,,,,,,,,https://alpha.example.org/camps,
+t-alpha,,ok,alpha,Added by hand,,,,,,,,,,2027-07-05,2027-07-09,,,,,,,,,,,,,,,,,,,,,,,https://alpha.example.org/camps,
+t-beta,beta-camp-2027,ok,beta,Camp,,,,,,,,,,7/5/2027,2027-07-09,,,,,,,,,,,,,,,,,,,,,,,https://beta.example.org,
