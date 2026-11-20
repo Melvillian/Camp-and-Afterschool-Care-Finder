@@ -9,6 +9,7 @@ Run from project root:
 Outputs data.js containing:
     const PROGRAMS = [...];       // all programs with org fields merged in
     const ORGANIZATIONS = [...];  // full org list for the "More from this org" modal
+    const TOWN_COORDS = {...};    // {town: [lat, lng]} for towns the data uses
 """
 
 import csv
@@ -18,6 +19,9 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from vt_towns import load_town_centroids
 
 ROOT         = Path(__file__).parent.parent
 ORGS_CSV     = ROOT / "data/organizations.csv"
@@ -411,6 +415,13 @@ def main():
     afterschool = [p for p in program_objs if p["category"] == "afterschool"]
     now_str     = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
+    # Coordinates only for towns that some program or organization uses
+    centroids   = load_town_centroids()
+    used_towns  = sorted({o["city"] for o in program_objs + org_objs if o["city"]})
+    town_coords = {t: list(centroids[t]) for t in used_towns if t in centroids}
+    missing     = [t for t in used_towns if t not in centroids]
+    print(f"towns without coordinates: {missing}")
+
     programs_js = json.dumps(program_objs, indent=2, ensure_ascii=False)
     orgs_js     = json.dumps(org_objs, indent=2, ensure_ascii=False)
 
@@ -419,7 +430,8 @@ def main():
         f"// Generated: {now_str} | Orgs: {len(org_objs)} | Programs: {len(program_objs)}"
         f" | Camps: {len(camps)} | Afterschool: {len(afterschool)}\n\n"
         f"const PROGRAMS = {programs_js};\n\n"
-        f"const ORGANIZATIONS = {orgs_js};\n"
+        f"const ORGANIZATIONS = {orgs_js};\n\n"
+        f"const TOWN_COORDS = {json.dumps(town_coords, indent=2, ensure_ascii=False)};\n"
     )
     OUT_PATH.write_text(output, encoding="utf-8")
 

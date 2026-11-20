@@ -740,33 +740,35 @@ function renderCalendar(programs) {
 }
 
 // ===== Map =====
-const CITY_COORDS = {
-  'Burlington': [44.4759, -73.2121],
-  'South Burlington': [44.4667, -73.1710],
-  'Winooski': [44.4918, -73.1873],
-  'Shelburne': [44.3762, -73.2293],
-  'Williston': [44.4270, -73.0618],
-  'Essex': [44.4918, -73.1124],
-  'Essex Junction': [44.4918, -73.1124],
-  'Colchester': [44.5454, -73.1543],
-  'Milton': [44.6078, -73.1076],
-  'Richmond': [44.4040, -72.9996],
-  'Hinesburg': [44.3351, -73.1152],
-  'Charlotte': [44.3090, -73.2565],
-  'St Albans': [44.8117, -73.0832],
-  'St. Albans': [44.8117, -73.0832],
-  'Montpelier': [44.2601, -72.5754],
-  'Middlebury': [44.0145, -73.1673],
-  'Brattleboro': [42.8509, -72.5579],
-  'Rutland': [43.6106, -72.9726],
-  'St Johnsbury': [44.4196, -72.0162],
-  'St. Johnsbury': [44.4196, -72.0162],
-  'White River Junction': [43.6493, -72.3193]
-};
-
 const VT_BOUNDS = [[42.73, -73.44], [45.02, -71.46]];
 
+function updateMapUnplacedNote(programs) {
+  const townCoords = typeof TOWN_COORDS !== 'undefined' ? TOWN_COORDS : {};
+  const unplaced = programs.filter(p => !p.city || !townCoords[p.city]).length;
+  const note = document.getElementById('mapUnplacedNote');
+  if (unplaced > 0) {
+    note.textContent = unplaced === 1
+      ? '1 result has no mapped town and is not shown on the map.'
+      : `${unplaced} results have no mapped town and are not shown on the map.`;
+    note.style.display = '';
+  } else {
+    note.style.display = 'none';
+  }
+}
+
+// Update the note right away (it does not need Leaflet's layout), then draw the map.
+function scheduleMapRender() {
+  updateMapUnplacedNote(lastFiltered);
+  // Double RAF: ensures Leaflet container has real pixel dimensions before rendering
+  requestAnimationFrame(() => requestAnimationFrame(() => renderMap(lastFiltered)));
+}
+
 function renderMap(programs) {
+  const townCoords = typeof TOWN_COORDS !== 'undefined' ? TOWN_COORDS : {};
+  updateMapUnplacedNote(programs);
+
+  if (typeof L === 'undefined') return;
+
   if (!mapInstance) {
     mapInstance = L.map('mapContainer', {
       maxBounds: VT_BOUNDS,
@@ -792,7 +794,7 @@ function renderMap(programs) {
   });
 
   Object.entries(cityGroups).forEach(([city, progs]) => {
-    const coords = CITY_COORDS[city];
+    const coords = townCoords[city];
     if (!coords) return;
 
     const radius = Math.min(8 + progs.length * 1.6, 30);
@@ -982,8 +984,7 @@ function switchView(view) {
 
   if (view === 'list') renderCards(lastFiltered);
   else if (view === 'calendar') renderCalendar(lastFiltered);
-  // Double RAF: ensures Leaflet container has real pixel dimensions before rendering
-  else requestAnimationFrame(() => requestAnimationFrame(() => renderMap(lastFiltered)));
+  else scheduleMapRender();
 }
 
 function update() {
@@ -993,8 +994,7 @@ function update() {
 
   if (currentView === 'list') renderCards(lastFiltered);
   else if (currentView === 'calendar') renderCalendar(lastFiltered);
-  // Double RAF: ensures Leaflet container has real pixel dimensions before rendering
-  else requestAnimationFrame(() => requestAnimationFrame(() => renderMap(lastFiltered)));
+  else scheduleMapRender();
 }
 
 function clearAllFilters() {
@@ -1160,6 +1160,8 @@ function init() {
   populateFiltersForCategory();
   update();
   renderExportPanel();
+  if (location.hash === '#map') switchView('map');
+  else if (location.hash === '#calendar') switchView('calendar');
 }
 
 init();

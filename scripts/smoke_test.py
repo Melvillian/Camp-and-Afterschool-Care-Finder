@@ -109,6 +109,8 @@ def main():
             check("season: notice visible", 'id="seasonNotice" class="season-notice"' in dom)
             dom = dump_dom("index.html", drop_uids=["camp-past"])
             check("season: no last-season rows, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
+            dom = dump_dom("index.html#map")
+            check("map: note counts programs with no usable town", "2 results have no mapped town and are not shown on the map." in dom)
             dom = dump_dom("afterschool.html")
             check("season: undated category, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
         finally:

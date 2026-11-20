@@ -431,3 +431,5 @@ const ORGANIZATIONS = [
     "notes": ""
   }
 ];
+
+const TOWN_COORDS = { "Burlington": [44.4874, -73.2312], "Montpelier": [44.2659, -72.5717], "Winooski": [44.4951, -73.1846] };
