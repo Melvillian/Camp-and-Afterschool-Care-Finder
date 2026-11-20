@@ -18,12 +18,12 @@
 - `data.js` is only ever changed by running `python3 scripts/build_data_js.py`; commit the regenerated file in the same commit as the script change.
 - No CSV schema changes.
 - Work on branch `fix/site-bugs`, one commit per task.
-- Notice copy (Task 4), exactly: `These are {year} programs, shown for reference. Dates and prices are from last season; new listings appear as camps announce them.`
+- Notice copy (Task 4), exactly: `Listings marked {year} are last season's, shown for reference until that camp posts new dates.`
 - Banner copy (Task 7), exactly: `You are viewing edits saved in this browser on {date}, not the published data.` and, when stale, ` The published data has changed since then.`
 
 ## Review Focus
 
-1. A program with a `startDate` but no `endDate` on the season boundary: it counts as past once its start date has passed, and must not flip the whole page into "last season" mode while another program is still upcoming. (Task 4)
+1. A program with a `startDate` but no `endDate` on the season boundary: it counts as past once its start date has passed, and is hidden, not shown as last season, while a sibling program from the same organization is still upcoming. (Task 4)
 2. A town name that is not in the GeoJSON, such as `St. Albans` or a typo: the map still renders, and the program is counted in the "not shown on the map" note. (Task 5)
 3. Corrupt or non-JSON content in the admin's localStorage keys: the admin loads the published data instead of throwing. (Task 7)
 4. A `website` value that is not `http:` or `https:` (for example `javascript:alert(1)`): no "Visit Website" link is rendered. (Task 2)
@@ -33,7 +33,7 @@
 
 | File | Responsibility |
 |---|---|
-| `lib.js` (new) | Pure helpers: `escapeHtml`, `safeUrl`, `formatAddress`, `isPast`, `defaultShowPast`, `latestProgramYear`, `localEditsStatus`. No DOM access. |
+| `lib.js` (new) | Pure helpers: `escapeHtml`, `safeUrl`, `formatAddress`, `isPast`, `defaultVisibility`, `lastSeasonYear`, `localEditsStatus`. No DOM access. |
 | `app.js` | Rendering and events for the two public pages. Calls `CampLib`. |
 | `admin.html` | Admin editor. Calls `CampLib.localEditsStatus` and `CampLib.escapeHtml`. |
 | `scripts/vt_towns.py` (new) | Town names, aliases, county lookup and centroids from the GeoJSON. |
@@ -216,55 +216,87 @@ git commit -m "fix: skip blank parts in exported Full Address"
 
 ---
 
-### Task 4: Show last season's programs when nothing is upcoming (bug 2)
+### Task 4: Keep last season's programs visible until that organization posts new ones (bug 2)
+
+*Revised 2026-11-20: the rule is per organization, not per page. A per-page rule would hide every other organization's 2026 camps as soon as one organization's 2027 camps were added.*
 
 **Files:**
-- Modify: `lib.js`, `tests/js/lib.test.js`, `app.js` (`isPast`, `programYear`, `init`, `clearAllFilters`), `index.html` and `afterschool.html` (add `<p id="seasonNotice" class="season-notice hidden"></p>` directly above the element with `id="resultsCount"`'s container), `styles.css`, `scripts/smoke_test.py`
+- Modify: `lib.js`, `tests/js/lib.test.js`, `app.js` (`isPast`, `applyFilters`, `init`, `activeFilters`/`clearAllFilters`), `index.html` and `afterschool.html` (add `<p id="seasonNotice" class="season-notice hidden"></p>` directly above the results-count row), `styles.css`, `tests/fixtures/data.fixture.js`, `scripts/smoke_test.py`
 
 **Interfaces:**
 - Produces:
-  - `CampLib.isPast(p: {startDate, endDate}, todayIso: string) -> boolean` — same rule as today's `isPast` in `app.js:15-19`, with the date passed in.
-  - `CampLib.defaultShowPast(programs: object[], todayIso: string) -> boolean` — `true` when at least one program has a date and every dated program is past.
-  - `CampLib.latestProgramYear(programs: object[]) -> string | null` — the greatest four-digit year among `endDate || startDate`, or `null` when none are dated.
+  - `CampLib.isPast(p: {startDate, endDate}, todayIso: string) -> boolean` — same rule as today's `isPast` in `app.js`, with the date passed in.
+  - `CampLib.defaultVisibility(programs: object[], todayIso: string) -> Map<string, 'current' | 'lastSeason' | 'hidden'>`, keyed by `uid`. Programs are grouped by `orgId`; a program with a blank `orgId` is a group of its own. A program's year is `Number(programYear)`, falling back to the year of `endDate || startDate`, then `0`. For each program, in order:
+    1. its group has a program with a later year → `'hidden'` (superseded);
+    2. it is not past → `'current'`;
+    3. its group has a dated program that is not past → `'hidden'` (mid-season, as today);
+    4. otherwise → `'lastSeason'`.
+  - `CampLib.lastSeasonYear(programs: object[], visibility: Map) -> string | null` — the greatest year among `'lastSeason'` programs, or `null` when there are none.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```js
 const T = '2026-11-20';
-const past = { startDate: '2026-07-06', endDate: '2026-07-10' };
-const upcoming = { startDate: '2027-07-05', endDate: '2027-07-09' };
-const undated = { startDate: '', endDate: '' };
+const P = (uid, orgId, programYear, startDate = '', endDate = '') => ({ uid, orgId, programYear, startDate, endDate });
 
 test('isPast uses end date, then start date', () => {
-  assert.equal(isPast(past, T), true);
-  assert.equal(isPast(upcoming, T), false);
-  assert.equal(isPast(undated, T), false);
-  assert.equal(isPast({ startDate: '2026-11-20', endDate: '' }, T), false);
-  assert.equal(isPast({ startDate: '2026-11-19', endDate: '' }, T), true);
-  assert.equal(isPast({ startDate: '2026-11-01', endDate: '2026-11-20' }, T), false);
+  assert.equal(isPast(P('x', 'o', '2026', '2026-07-06', '2026-07-10'), T), true);
+  assert.equal(isPast(P('x', 'o', '2027', '2027-07-05', '2027-07-09'), T), false);
+  assert.equal(isPast(P('x', 'o', '2026'), T), false);
+  assert.equal(isPast(P('x', 'o', '2026', '2026-11-20'), T), false);
+  assert.equal(isPast(P('x', 'o', '2026', '2026-11-19'), T), true);
+  assert.equal(isPast(P('x', 'o', '2026', '2026-11-01', '2026-11-20'), T), false);
 });
-test('defaultShowPast is true only when every dated program is past', () => {
-  assert.equal(defaultShowPast([past, undated], T), true);
-  assert.equal(defaultShowPast([past, upcoming], T), false);
-  assert.equal(defaultShowPast([past, { startDate: '2026-12-01', endDate: '' }], T), false);
-  assert.equal(defaultShowPast([undated], T), false);
-  assert.equal(defaultShowPast([], T), false);
+
+test('defaultVisibility decides per organization', () => {
+  const programs = [
+    P('a1', 'A', '2026', '2026-07-06', '2026-07-10'),   // only last season exists
+    P('b1', 'B', '2026', '2026-07-06', '2026-07-10'),   // superseded by b2
+    P('b2', 'B', '2027', '2027-07-05', '2027-07-09'),
+    P('c1', 'C', '2026'),                               // undated, superseded by c2
+    P('c2', 'C', '2027'),
+    P('d1', 'D', '2026', '2026-11-01', '2026-11-05'),   // mid-season: sibling still upcoming
+    P('d2', 'D', '2026', '2026-12-01', '2026-12-05'),
+    P('e1', 'E', '2026'),                               // undated, nothing newer
+    P('n1', '', '2026', '2026-07-06', '2026-07-10'),    // no org: judged alone
+    P('n2', '', '2027', '2027-07-05', '2027-07-09'),
+  ];
+  const v = defaultVisibility(programs, T);
+  assert.deepEqual(Object.fromEntries(v), {
+    a1: 'lastSeason', b1: 'hidden', b2: 'current', c1: 'hidden', c2: 'current',
+    d1: 'hidden', d2: 'current', e1: 'current', n1: 'lastSeason', n2: 'current',
+  });
+  assert.equal(lastSeasonYear(programs, v), '2026');
 });
-test('latestProgramYear', () => {
-  assert.equal(latestProgramYear([past, upcoming, undated]), '2027');
-  assert.equal(latestProgramYear([undated]), null);
+
+test('defaultVisibility: start date only, on the boundary', () => {
+  const programs = [P('s1', 'S', '2026', '2026-11-19'), P('s2', 'S', '2026', '2026-11-20')];
+  assert.deepEqual(Object.fromEntries(defaultVisibility(programs, T)), { s1: 'hidden', s2: 'current' });
+});
+
+test('defaultVisibility: year falls back to the dates, then to 0', () => {
+  const programs = [P('f1', 'F', '', '2026-07-06', '2026-07-10'), P('f2', 'F', '', '2027-07-05', '2027-07-09'), P('f3', 'F', '')];
+  assert.deepEqual(Object.fromEntries(defaultVisibility(programs, T)), { f1: 'hidden', f2: 'current', f3: 'hidden' });
+});
+
+test('lastSeasonYear is null when nothing is last season', () => {
+  const programs = [P('b2', 'B', '2027', '2027-07-05', '2027-07-09')];
+  assert.equal(lastSeasonYear(programs, defaultVisibility(programs, T)), null);
+  assert.equal(lastSeasonYear([], new Map()), null);
 });
 ```
 
-Add to `smoke_test.py`. The fixture's camps include one upcoming program, so the notice must stay hidden there; a second fixture pass with `camp-future` removed must show it:
+Add one program to the fixture: `camp-old`, category `camp`, name `Old Camp`, city `Burlington`, the same `orgId` as `camp-future`, `programYear` `"2001"`, dates 2001-07-09 / 2001-07-13. Give `camp-future` `programYear` `"2099"` and `camp-past` `programYear` `"2001"`, and make sure `camp-past` and `camp-future` have different `orgId` values. Update Task 1's check to `"of <strong>5</strong> camps"`.
+
+Add to `smoke_test.py`:
 
 ```python
 dom = dump_dom("index.html")
-check("season: upcoming exists, past hidden", "Showing <strong>3</strong> of <strong>4</strong> camps" in dom)
-check("season: notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
-dom = dump_dom("index.html", drop_uids=["camp-future"])
-check("season: all past, everything shown", "Showing <strong>3</strong> of <strong>3</strong> camps" in dom)
-check("season: notice text", "These are 2001 programs, shown for reference." in dom)
+check("season: superseded row hidden, last-season row shown", "Showing <strong>4</strong> of <strong>5</strong> camps" in dom)
+check("season: notice text", "Listings marked 2001 are last season's, shown for reference until that camp posts new dates." in dom)
+check("season: notice visible", 'id="seasonNotice" class="season-notice"' in dom)
+dom = dump_dom("index.html", drop_uids=["camp-past"])
+check("season: no last-season rows, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
 dom = dump_dom("afterschool.html")
 check("season: undated category, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
 ```
@@ -277,17 +309,19 @@ check("season: undated category, notice hidden", 'id="seasonNotice" class="seaso
 
 - [ ] **Step 4: Wire into `app.js`**
 
-`isPast(p)` and `programYear(p)` in `app.js` delegate to `CampLib`. In `init()`, after `allPrograms` is set: compute `const pastByDefault = CampLib.defaultShowPast(categoryPrograms(), TODAY)`, store it in a module-level `let defaultPast`, set `activeFilters.showPast = defaultPast` and `filterShowPast.checked = defaultPast`, and when true unhide `#seasonNotice` with the notice copy from Global Constraints, `{year}` from `latestProgramYear(categoryPrograms())`. `clearAllFilters` resets `showPast` and the checkbox to `defaultPast` instead of `false`.
+`isPast(p)` in `app.js` delegates to `CampLib.isPast(p, TODAY)`. In `init()`, after `allPrograms` is set, compute `visibility = CampLib.defaultVisibility(categoryPrograms(), TODAY)` into a module-level variable. In `applyFilters`, the first test becomes: when `activeFilters.showPast` is false, drop the program if `visibility.get(p.uid) === 'hidden'`. "Include past programs" stays unchecked by default and still shows everything when ticked. When `CampLib.lastSeasonYear(...)` is not null, unhide `#seasonNotice` with the text `Listings marked {year} are last season's, shown for reference until that camp posts new dates.` Last-season cards already sort last and carry the year chip through the existing `isPast` handling in `renderCards`; leave that as it is.
 
-- [ ] **Step 5: Style `.season-notice`** in `styles.css` to match the existing `.results-header` text scale with a pale yellow background.
+Also rename the mistyped key `data` to `date` in the `activeFilters` declaration and in `clearAllFilters`.
+
+- [ ] **Step 5: Style `.season-notice`** in `styles.css` to match the results-count text scale, with a pale yellow background.
 
 - [ ] **Step 6: Run all tests** — Expected: all pass.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add lib.js tests/js/lib.test.js app.js index.html afterschool.html styles.css scripts/smoke_test.py
-git commit -m "fix: show last season's programs with a notice when nothing is upcoming"
+git add lib.js tests/js/lib.test.js app.js index.html afterschool.html styles.css tests/fixtures/data.fixture.js scripts/smoke_test.py
+git commit -m "fix: keep last season's programs visible until that organization posts new ones"
 ```
 
 ---
@@ -352,11 +386,11 @@ In `main()`, collect the distinct non-blank `city` values of `program_objs` and 
 Add `const TOWN_COORDS = { "Burlington": [44.4874, -73.2312], "Montpelier": [44.2659, -72.5717], "Winooski": [44.4951, -73.1846] };` to the fixture. So the smoke test can open the map directly, `init()` calls `switchView('map')` when `location.hash === '#map'` (and likewise `'#calendar'`).
 
 ```python
-dom = dump_dom("index.html#map", drop_uids=["camp-future"])
+dom = dump_dom("index.html#map")
 check("map: note counts programs with no usable town", "2 results have no mapped town and are not shown on the map." in dom)
 ```
 
-(`camp-undated` has no city and `camp-evil` is in `Nowhereville`; `camp-past` in Montpelier is placed.)
+(Of the four camps shown by default, `camp-undated` has no city and `camp-evil` is in `Nowhereville`; `camp-future` in Burlington and `camp-past` in Montpelier are placed.)
 
 In `app.js`, delete `CITY_COORDS` and read coordinates from `typeof TOWN_COORDS !== 'undefined' ? TOWN_COORDS : {}`. At the top of `renderMap`, before any use of Leaflet's `L` (the smoke test may run without network access to the Leaflet CDN), count programs whose city is blank or has no coordinates and write the note into `#mapUnplacedNote`: `1 result has no mapped town and is not shown on the map.` for one, `${n} results have no mapped town and are not shown on the map.` for more, hidden when `n` is 0. Return early from `renderMap` when `typeof L === 'undefined'`.
 
@@ -529,7 +563,7 @@ git commit -m "fix: add a favicon"
 - [ ] **Step 2: Check the real pages locally**
 
 Run `python3 scripts/dev_server.py`, then load each page in a browser:
-- `index.html`: count line reads `Showing 382 of 382 camps` with the 2026 notice; no console errors.
+- `index.html`: count line reads `Showing 382 of 382 camps` (no organization has 2027 programs yet, so nothing is superseded) with the 2026 notice; no console errors.
 - Map view: more than 13 markers; the note counts the camps with no town (60 at the time of writing).
 - `afterschool.html`: `Showing 10 of 10 afterschool programs`; no console errors.
 - Save one camp for export, download the CSV, confirm "Full Address" has no leading comma.

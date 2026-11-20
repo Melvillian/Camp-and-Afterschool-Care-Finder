@@ -54,7 +54,7 @@ Each is Claude's call unless marked otherwise.
 | # | Bug | Decision |
 |---|---|---|
 | 1 | Afterschool page crash | `app.js` treats `filterDate` as optional. The date filter stays camps-only. |
-| 2 | Camps hidden out of season | When a category has dated programs and none are upcoming, "Include past programs" defaults to on and a notice says the listings are last season's. When any upcoming program exists, behaviour is unchanged. |
+| 2 | Camps hidden out of season | Decided per organization. An organization's past programs stay visible, marked with their year, until that organization has a later year's programs or an upcoming one; then they are hidden by default. A notice explains the marked listings. "Include past programs" still shows everything. |
 | 3 | Map coverage | Town coordinates are generated at build time from the Vermont town GeoJSON already in the repo, replacing the hand-written list of 21 cities. Programs with no town get a count note under the map, like the calendar's undated note. |
 | 4 | Export address | "Full Address" is `street, city, ST zip` with blank parts skipped. County is dropped from it because it already has its own column. |
 | 5 | Favicon | A `favicon.svg` tent icon linked from all six pages. |
@@ -64,9 +64,9 @@ Each is Claude's call unless marked otherwise.
 
 ### Notice copy for bug 2
 
-> These are {year} programs, shown for reference. Dates and prices are from last season; new listings appear as camps announce them.
+> Listings marked {year} are last season's, shown for reference until that camp posts new dates.
 
-`{year}` is the latest year among the category's dated programs.
+`{year}` is the latest year among the listings shown as last season's.
 
 ### Banner copy for bug 6
 
@@ -84,4 +84,4 @@ followed, when the stamps differ, by:
 
 ## Open question for Melvillian
 
-Bug 2 has a real alternative: keep past programs hidden and show an explanatory empty state. The chosen behaviour favours a useful-looking site during the months before 2027 data exists. Once 2027 programs are added, both behave the same.
+Bug 2 was first designed per page: show last season's programs only while nothing at all is upcoming. An independent review of the 2027 ingestion design pointed out that the first 2027 camp to be added would then hide every other organization's 2026 camps. The per-organization rule above replaces it. Melvillian was asked on 2026-11-20 and had not answered when the work reached this task, so this is Claude's call.
