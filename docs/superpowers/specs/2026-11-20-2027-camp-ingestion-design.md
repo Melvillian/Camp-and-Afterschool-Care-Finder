@@ -107,7 +107,7 @@ A new `data/sources.csv`, one row per organization page worth watching:
 `org_id, listing_url, kind, robots_ai_optout, expected_open, last_checked, last_hash, status_2027, notes`
 
 - `kind` is `html`, `pdf`, `rec1`, `gated` or `manual`.
-- `status_2027` is `not_posted`, `posted`, `extracted`, `merged` or `not_running`.
+- `status_2027` is `not_posted`, `posted`, `extracted`, `merged`, `changed` or `not_running`.
 - `expected_open` is seeded from the 2026 dates above, to order the work.
 
 Seeding it is the first job, and includes repairing the 21 dead links (the YMCA's 16 programs point at a page that no longer exists).
@@ -121,7 +121,7 @@ Seeding it is the first job, and includes repairing the 21 dead links (the YMCA'
 For each `posted` source, an extraction step writes proposed rows to `data/staging/2027/<org_id>.csv`. Columns are those of `programs.csv` plus `source_url`, `source_quote` and `extracted_on`.
 
 - `html` and `pdf`: Claude, running locally in Claude Code as a project skill, reads the fetched page and fills the schema. Fields not stated on the page are left blank, never guessed. Descriptions are written fresh in one or two neutral sentences.
-- `rec1`: from a department's export if we have one; otherwise from the catalog's JSON in a real browser session, run locally.
+- `rec1`: from a department's export if we have one. The browser-driven fallback is not built in this round; if no export has arrived by early January it is decided then, and until then the Rec1 towns are `enter_new` tasks.
 - `gated` and `manual`: no draft is produced; a volunteer enters the rows in the Sheet from scratch.
 - Sites whose `robots.txt` names AI crawlers (`robots_ai_optout`) are treated as `manual`: Claude does not read them.
 
@@ -139,6 +139,7 @@ One task is one organization. There are three kinds, sized so a volunteer can pi
 | `find_page` | 2 min | The link is dead or missing. Find the camp's current summer page and paste its URL. |
 | `check_draft` | 10 min | Compare the drafted rows with the camp's page. Fix what is wrong, mark invented rows for deletion. |
 | `enter_new` | 30–60 min | No draft exists. Type the camp's sessions in from its page. |
+| `check_changes` | 10 min | The camp's page changed after its rows went live. Update the rows to match. |
 
 The Sheet has four tabs:
 
@@ -164,7 +165,7 @@ A volunteer claims a task by typing their name and setting `status` to `claimed`
 2. Rewrites only the columns the script owns (everything on **Tasks** except the four volunteer columns), and never touches a **Drafts** row once it has been pushed. From that point the Sheet is the source of truth for that row until it is merged.
 3. Releases expired claims and applies `needs_help` flags.
 
-Writing to the Sheet needs credentials. `push` uses the Google Sheets API with a service-account key, read from a path in an environment variable and never committed. Melvillian will create that key later. Until it exists, `push` writes the rows it would have added to `data/staging/2027/sheet/_to_paste.csv`, and a maintainer pastes them into the Sheet. Both paths sit behind one small interface, so adding the key later is configuration, not a rewrite.
+Writing to the Sheet needs credentials, which do not exist yet. For now `push` writes the rows it would add or change to `data/staging/2027/sheet/_to_paste.csv`, and a maintainer pastes them into the Sheet. That is all that gets built in this round. Writing directly through the Google Sheets API is deferred until Melvillian creates the service-account key; it needs token signing that the Python standard library cannot do, so the choice of how (one optional dependency, or calling `openssl`) is made then. `push` keeps "work out what to write" separate from "write it", so the direct path can be added without touching the rest.
 
 A maintainer looks over each ready staging file before merging; that is the final check, and it is the reason an openly editable Sheet is tolerable.
 
@@ -190,7 +191,13 @@ It passes before that date, and passes permanently once `public_edit` is `false`
 
 ### 5. Merge
 
-`scripts/merge_staging.py` appends the rows of a ready staging file to `programs.csv` with `program_year = 2027`, `confidence = confirmed`, `verified_date` set to the review date, and a new `program_id` of the form `<org_id>-<name-slug>-2027`, numbered when an organization repeats a name. It matches on organization, name and start date, so re-running an extraction updates rows instead of duplicating them. It then runs the validator and the build.
+Every drafted row is given its permanent `program_id` when it is first created, of the form `<org_id>-<name-slug>-2027`, with `-2`, `-3` and so on when an organization repeats a name. That value is the row's `row_id` in the Sheet and is never regenerated, so a volunteer can correct the name or dates without changing the row's identity. Rows a volunteer adds by hand get their id on the next pull.
+
+`scripts/merge_staging.py` writes the rows of a ready staging file into `programs.csv` by `program_id`: a new id is appended, an existing id is updated in place, and a row marked `delete` is set to `confidence = inactive`, never removed. Merged rows get `program_year = 2027`, `confidence = confirmed` and `verified_date` set to the review date. It then runs the validator and the build.
+
+### 6. Changes after merge
+
+Providers often post dates first and prices or extra sessions later. The watch keeps running on merged organizations. When a merged organization's page changes, `status_2027` goes to a new value, `changed`, and the next push creates a `check_changes` task (10 minutes): the Sheet shows the organization's current rows, and the volunteer updates them against the page. Nothing is re-extracted over a reviewed row automatically.
 
 2026 rows are left untouched. With the season notice from the bug-fix plan, they show as last season's until an organization's 2027 rows exist.
 
@@ -208,6 +215,10 @@ It passes before that date, and passes permanently once `public_edit` is `false`
 - Registration-open dates are on the site for the ten largest organizations before their registration opens.
 - By February 1, 2027, organizations that held at least 60% of 2026's programs have 2027 rows.
 - No 2027 row has a date outside 2027, and every one has a `verified_date` and a staging row with a source.
+
+## Dependencies
+
+The site bug-fix plan (`docs/superpowers/plans/2026-11-20-site-bug-fixes.md`) lands first. This work builds on its test setup, its stable program ids and its handling of last season's programs.
 
 ## Risks
 
@@ -229,7 +240,15 @@ Made by Melvillian on 2026-11-20:
    - sites that name AI crawlers in `robots.txt` are entered by hand;
    - Claude drafts the export request to the three recreation departments; who sends it is still open (see below).
 
+Raised by an independent review of this document and still open (asked of Melvillian 2026-11-20):
+
+- **Where an organization's registration date appears before its sessions are posted.** Recommended: store the dates per organization, add two columns to `organizations.csv`, and add a "Registration opening soon" list to the Camps page. This would reverse two statements above (no new columns; no display changes).
+- **What happens to an organization's 2026 rows once any 2027 rows exist.** Recommended: decide per organization, not per page. An organization's 2026 rows stay visible, marked as last season, until that organization has 2027 rows.
+
 Claude's calls, not yet confirmed:
+
+- Direct Sheet writes and the Rec1 browser fallback are deferred, not built in this round.
+- A drafted row's permanent id is assigned at extraction; merge is by id; page changes after merge create a volunteer task.
 
 - The task board is a page on the camp finder site that reads the Sheet live.
 - The tab and column layout of the Sheet.
