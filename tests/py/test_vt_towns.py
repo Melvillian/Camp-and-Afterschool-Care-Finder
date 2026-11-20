@@ -17,6 +17,13 @@ class TownCentroids(unittest.TestCase):
     def test_aliases_resolve(self):
         self.assertEqual(self.c["St. Albans"], self.c["Saint Albans City"])
 
+    def test_every_alias_maps_to_its_canonical_town(self):
+        counties = vt_towns.load_town_county_map()
+        for alias, canonical in vt_towns.CITY_ALIASES.items():
+            self.assertIn(alias, self.c)
+            self.assertEqual(self.c[alias], self.c[canonical])
+            self.assertIn(alias, counties)
+
     def test_all_towns_inside_vermont(self):
         self.assertGreaterEqual(len(self.c), 256)
         for lat, lng in self.c.values():

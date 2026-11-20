@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -95,4 +95,12 @@ test('localEditsStatus: copies from before stamping are stale', () => {
 test('localEditsStatus: corrupt JSON is ignored', () => {
   const s = localEditsStatus({ programs: '{not json', orgs: '"a string"', stamp: 'A', savedAt: 'x' }, 'A');
   assert.deepEqual([s.useLocal, s.programs, s.orgs], [false, null, null]);
+});
+
+test('seasonYear prefers the programYear field, then the dates', () => {
+  assert.equal(seasonYear({ programYear: '2026', startDate: '2025-07-07', endDate: '2025-07-11' }), '2026');
+  assert.equal(seasonYear({ programYear: '', startDate: '2025-07-07', endDate: '' }), '2025');
+  assert.equal(seasonYear({ programYear: 2027 }), '2027');
+  assert.equal(seasonYear({ programYear: '', startDate: '', endDate: '' }), null);
+  assert.equal(seasonYear({}), null);
 });

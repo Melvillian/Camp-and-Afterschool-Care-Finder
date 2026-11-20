@@ -20,6 +20,9 @@ CITY_ALIASES = {
     "Rutland": "Rutland City",
     "Barre": "Barre City",
     "Hyde Park": "Hyde Park",  # Lamoille County
+    "St. Johnsbury": "Saint Johnsbury",
+    "St Johnsbury": "Saint Johnsbury",
+    "White River Junction": "Hartford",
 }
 
 

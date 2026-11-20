@@ -161,6 +161,9 @@ def validate_programs(valid_org_ids: set[str]):
                 if not (row.get(col) or "").strip():
                     warn(f"{label}: '{col}' is blank (run backfill_age_grade.py)")
 
+            if pid and not SLUG_RE.match(pid):
+                err(f"{label}: program_id '{pid}' is not valid kebab-case (no spaces/uppercase)")
+
             # Duplicate program_id
             if pid:
                 if pid in seen_ids:

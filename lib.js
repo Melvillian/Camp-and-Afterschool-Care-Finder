@@ -35,11 +35,17 @@
     return false;
   }
 
-  function yearOf(p) {
+  // The season a program belongs to, as a string: the programYear field if set,
+  // else the year of its end (or start) date, else null.
+  function seasonYear(p) {
     const fromField = Number(p.programYear);
-    if (fromField) return fromField;
+    if (fromField > 0) return String(fromField);
     const d = p.endDate || p.startDate;
-    return d ? Number(d.slice(0, 4)) || 0 : 0;
+    return d && /^\d{4}/.test(d) ? d.slice(0, 4) : null;
+  }
+
+  function yearOf(p) {
+    return Number(seasonYear(p)) || 0;
   }
 
   // Per-organization default visibility, keyed by uid:
@@ -105,5 +111,5 @@
     };
   }
 
-  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus };
+  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear };
 });

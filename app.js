@@ -19,10 +19,6 @@ function isPast(p) {
 // uid -> 'current' | 'lastSeason' | 'hidden', computed once in init()
 let visibility = new Map();
 
-function programYear(p) {
-  const d = p.endDate || p.startDate;
-  return d ? d.slice(0, 4) : null;
-}
 // Org lookup keyed by orgId, populated synchronously from data.js ORGANIZATIONS
 const orgMap = new Map(
   (typeof ORGANIZATIONS !== 'undefined' ? ORGANIZATIONS : []).map(o => [o.orgId, o])
@@ -605,7 +601,7 @@ function renderCards(programs) {
       ? `<span class="week-badge">${fmtWeekRange(p.startDate, p.endDate)}</span>`
       : '';
 
-    const pYear = past ? programYear(p) : null;
+    const pYear = past ? CampLib.seasonYear(p) : null;
     const yearChipHtml = pYear
       ? `<span class="year-chip">${pYear}</span>`
       : '';

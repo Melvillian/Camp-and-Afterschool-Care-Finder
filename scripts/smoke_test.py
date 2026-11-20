@@ -54,10 +54,10 @@ def dump_dom(path, drop_uids=()):
     drop_uids: programs to remove from the served data.js before loading.
     """
     data_js = Path(_state["site"]) / "data.js"
-    text = FIXTURE.read_text()
+    text = FIXTURE.read_text(encoding="utf-8")
     for uid in drop_uids:
         text = re.sub(r'  \{\n(?:(?!\n  \}).)*?"uid": "%s".*?\n  \},?\n' % re.escape(uid), "", text, flags=re.S)
-    data_js.write_text(text)
+    data_js.write_text(text, encoding="utf-8")
     with tempfile.TemporaryDirectory() as profile:
         result = subprocess.run(
             [
@@ -111,6 +111,7 @@ def main():
             check("safe url: link kept", 'href="https://example.org/camp"' in dom)
             check("season: superseded row hidden, last-season row shown", "Showing <strong>4</strong> of <strong>5</strong> camps" in dom)
             check("season: notice text", "Listings marked 2001 are last season's, shown for reference until that camp posts new dates." in dom)
+            check("season: card chip agrees with notice", '<span class="year-chip">2001</span>' in dom)
             check("season: notice visible", 'id="seasonNotice" class="season-notice"' in dom)
             dom = dump_dom("index.html", drop_uids=["camp-past"])
             check("season: no last-season rows, notice hidden", 'id="seasonNotice" class="season-notice hidden"' in dom)
