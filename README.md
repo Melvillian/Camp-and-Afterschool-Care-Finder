@@ -44,6 +44,10 @@ python scripts/build_data_js.py   # generates data.js
 
 The validation script exits 1 on errors (blocks the build). Warnings are printed but do not block.
 
+## 2027 ingestion
+
+New-season listings come in through a small pipeline: a script watches each organization's camp page, Claude Code drafts rows from pages that have posted, volunteers check the drafts in a shared Google Sheet, and a maintainer merges the checked rows. The weekly routine, first-time Sheet setup and recovery steps are in [`docs/ingestion/runbook.md`](docs/ingestion/runbook.md). What volunteers are told is in [`docs/ingestion/volunteer-how-to.md`](docs/ingestion/volunteer-how-to.md). The site's Volunteer page (`volunteer.html`) lists the open tasks. The letter asking the three Rec1 recreation departments for an export is [`docs/ingestion/rec1-export-request.md`](docs/ingestion/rec1-export-request.md).
+
 ## Utility scripts
 
 | Script | What it does |
