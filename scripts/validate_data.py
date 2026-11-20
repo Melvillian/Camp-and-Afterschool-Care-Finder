@@ -154,6 +154,101 @@ def validate_orgs() -> set[str]:
     return valid_ids
 
 
+def check_program_row(row: dict, org_ids: set[str], label: str) -> tuple[list[str], list[str]]:
+    """Per-row checks for one programs row: (error messages, warning messages)."""
+    errs: list[str] = []
+    warns: list[str] = []
+    pid = (row.get("program_id") or "").strip()
+    org_id = (row.get("org_id") or "").strip()
+
+    # Hard-required fields (must have a value)
+    for col in ("program_id", "org_id", "program_name", "program_type",
+                "program_year", "session_type", "schedule_type", "confidence"):
+        if not (row.get(col) or "").strip():
+            errs.append(f"{label}: required field '{col}' is blank")
+    # Soft-required fields (warn when blank — backfill_age_grade.py can fill these)
+    for col in ("grades_min", "grades_max"):
+        if not (row.get(col) or "").strip():
+            warns.append(f"{label}: '{col}' is blank (run backfill_age_grade.py)")
+
+    if pid and not SLUG_RE.match(pid):
+        errs.append(f"{label}: program_id '{pid}' is not valid kebab-case (no spaces/uppercase)")
+
+    # Foreign key check
+    if org_id and org_id not in org_ids:
+        errs.append(f"{label}: org_id '{org_id}' not found in organizations.csv")
+
+    # Enum checks
+    for col, valid_set in [
+        ("program_type", VALID_PROG_TYPES),
+        ("session_type",  VALID_SESSION),
+        ("schedule_type", VALID_SCHEDULE),
+        ("confidence",    VALID_CONFIDENCE),
+    ]:
+        v = (row.get(col) or "").strip()
+        if v and v not in valid_set:
+            errs.append(f"{label}: {col} '{v}' not in allowed values {sorted(valid_set)}")
+
+    # Grade ordering
+    gmin = (row.get("grades_min") or "").strip()
+    gmax = (row.get("grades_max") or "").strip()
+    if gmin and gmin not in VALID_GRADES:
+        warns.append(f"{label}: grades_min '{gmin}' not a recognized grade")
+    if gmax and gmax not in VALID_GRADES:
+        warns.append(f"{label}: grades_max '{gmax}' not a recognized grade")
+    if gmin and gmax and gmin in VALID_GRADES and gmax in VALID_GRADES:
+        if grade_index(gmin) > grade_index(gmax):
+            warns.append(f"{label}: grades_min '{gmin}' > grades_max '{gmax}'")
+
+    # Date ordering
+    sdate = (row.get("start_date") or "").strip()
+    edate = (row.get("end_date") or "").strip()
+    if sdate and not DATE_RE.match(sdate):
+        warns.append(f"{label}: start_date '{sdate}' is not YYYY-MM-DD")
+    if edate and not DATE_RE.match(edate):
+        warns.append(f"{label}: end_date '{edate}' is not YYYY-MM-DD")
+    if sdate and edate and DATE_RE.match(sdate) and DATE_RE.match(edate):
+        if sdate > edate:
+            warns.append(f"{label}: start_date '{sdate}' is after end_date '{edate}'")
+
+    # Cost
+    cost = (row.get("cost_per_week") or "").strip()
+    if cost:
+        try:
+            float(cost)
+        except ValueError:
+            warns.append(f"{label}: cost_per_week '{cost}' is not numeric")
+
+    # Activities tags
+    activities = (row.get("activities") or "").strip()
+    if activities:
+        for tag in [t.strip() for t in activities.split(",") if t.strip()]:
+            if tag not in CANONICAL_ACTIVITIES:
+                warns.append(f"{label}: activity tag '{tag}' not in canonical list")
+
+    # URL check
+    reg_url = (row.get("registration_url") or "").strip()
+    if not is_url(reg_url):
+        warns.append(f"{label}: registration_url '{reg_url}' does not look like a URL")
+
+    # Verified date
+    vdate = (row.get("verified_date") or "").strip()
+    if vdate and not DATE_RE.match(vdate):
+        warns.append(f"{label}: verified_date '{vdate}' is not YYYY-MM-DD")
+
+    # Registration dates
+    reg_opens = (row.get("registration_opens") or "").strip()
+    if reg_opens and not DATE_RE.match(reg_opens):
+        warns.append(f"{label}: registration_opens '{reg_opens}' is not YYYY-MM-DD")
+    reg_early = (row.get("registration_opens_early") or "").strip()
+    if reg_early and not DATE_RE.match(reg_early):
+        warns.append(f"{label}: registration_opens_early '{reg_early}' is not YYYY-MM-DD")
+    if reg_early and reg_opens and DATE_RE.match(reg_early) and DATE_RE.match(reg_opens):
+        if reg_early > reg_opens:
+            warns.append(f"{label}: registration_opens_early '{reg_early}' is after registration_opens '{reg_opens}'")
+    return errs, warns
+
+
 def validate_programs(valid_org_ids: set[str]):
     if not PROGRAMS_CSV.exists():
         err(f"programs.csv not found at {PROGRAMS_CSV}")
@@ -163,22 +258,13 @@ def validate_programs(valid_org_ids: set[str]):
     with open(PROGRAMS_CSV, newline="", encoding="utf-8") as f:
         for i, row in enumerate(csv.DictReader(f), start=2):
             pid     = (row.get("program_id") or "").strip()
-            org_id  = (row.get("org_id") or "").strip()
-            name    = (row.get("program_name") or "").strip()
             label   = f"programs row {i} ({pid[:40] or 'NO_ID'})"
 
-            # Hard-required fields (must have a value)
-            for col in ("program_id", "org_id", "program_name", "program_type",
-                        "program_year", "session_type", "schedule_type", "confidence"):
-                if not (row.get(col) or "").strip():
-                    err(f"{label}: required field '{col}' is blank")
-            # Soft-required fields (warn when blank — backfill_age_grade.py can fill these)
-            for col in ("grades_min", "grades_max"):
-                if not (row.get(col) or "").strip():
-                    warn(f"{label}: '{col}' is blank (run backfill_age_grade.py)")
-
-            if pid and not SLUG_RE.match(pid):
-                err(f"{label}: program_id '{pid}' is not valid kebab-case (no spaces/uppercase)")
+            row_errors, row_warnings = check_program_row(row, valid_org_ids, label)
+            for message in row_errors:
+                err(message)
+            for message in row_warnings:
+                warn(message)
 
             # Duplicate program_id
             if pid:
@@ -186,79 +272,6 @@ def validate_programs(valid_org_ids: set[str]):
                     err(f"{label}: duplicate program_id (also at row {seen_ids[pid]})")
                 else:
                     seen_ids[pid] = i
-
-            # Foreign key check
-            if org_id and org_id not in valid_org_ids:
-                err(f"{label}: org_id '{org_id}' not found in organizations.csv")
-
-            # Enum checks
-            for col, valid_set in [
-                ("program_type", VALID_PROG_TYPES),
-                ("session_type",  VALID_SESSION),
-                ("schedule_type", VALID_SCHEDULE),
-                ("confidence",    VALID_CONFIDENCE),
-            ]:
-                v = (row.get(col) or "").strip()
-                if v and v not in valid_set:
-                    err(f"{label}: {col} '{v}' not in allowed values {sorted(valid_set)}")
-
-            # Grade ordering
-            gmin = (row.get("grades_min") or "").strip()
-            gmax = (row.get("grades_max") or "").strip()
-            if gmin and gmin not in VALID_GRADES:
-                warn(f"{label}: grades_min '{gmin}' not a recognized grade")
-            if gmax and gmax not in VALID_GRADES:
-                warn(f"{label}: grades_max '{gmax}' not a recognized grade")
-            if gmin and gmax and gmin in VALID_GRADES and gmax in VALID_GRADES:
-                if grade_index(gmin) > grade_index(gmax):
-                    warn(f"{label}: grades_min '{gmin}' > grades_max '{gmax}'")
-
-            # Date ordering
-            sdate = (row.get("start_date") or "").strip()
-            edate = (row.get("end_date") or "").strip()
-            if sdate and not DATE_RE.match(sdate):
-                warn(f"{label}: start_date '{sdate}' is not YYYY-MM-DD")
-            if edate and not DATE_RE.match(edate):
-                warn(f"{label}: end_date '{edate}' is not YYYY-MM-DD")
-            if sdate and edate and DATE_RE.match(sdate) and DATE_RE.match(edate):
-                if sdate > edate:
-                    warn(f"{label}: start_date '{sdate}' is after end_date '{edate}'")
-
-            # Cost
-            cost = (row.get("cost_per_week") or "").strip()
-            if cost:
-                try:
-                    float(cost)
-                except ValueError:
-                    warn(f"{label}: cost_per_week '{cost}' is not numeric")
-
-            # Activities tags
-            activities = (row.get("activities") or "").strip()
-            if activities:
-                for tag in [t.strip() for t in activities.split(",") if t.strip()]:
-                    if tag not in CANONICAL_ACTIVITIES:
-                        warn(f"{label}: activity tag '{tag}' not in canonical list")
-
-            # URL check
-            reg_url = (row.get("registration_url") or "").strip()
-            if not is_url(reg_url):
-                warn(f"{label}: registration_url '{reg_url}' does not look like a URL")
-
-            # Verified date
-            vdate = (row.get("verified_date") or "").strip()
-            if vdate and not DATE_RE.match(vdate):
-                warn(f"{label}: verified_date '{vdate}' is not YYYY-MM-DD")
-
-            # Registration dates
-            reg_opens = (row.get("registration_opens") or "").strip()
-            if reg_opens and not DATE_RE.match(reg_opens):
-                warn(f"{label}: registration_opens '{reg_opens}' is not YYYY-MM-DD")
-            reg_early = (row.get("registration_opens_early") or "").strip()
-            if reg_early and not DATE_RE.match(reg_early):
-                warn(f"{label}: registration_opens_early '{reg_early}' is not YYYY-MM-DD")
-            if reg_early and reg_opens and DATE_RE.match(reg_early) and DATE_RE.match(reg_opens):
-                if reg_early > reg_opens:
-                    warn(f"{label}: registration_opens_early '{reg_early}' is after registration_opens '{reg_opens}'")
 
 
 def main():
