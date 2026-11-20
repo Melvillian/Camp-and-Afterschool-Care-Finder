@@ -1,12 +1,14 @@
 // Volunteer task board: reads the Tasks tab of the volunteer Sheet and lists open tasks by time needed.
-// Everything read from the Sheet is untrusted (anyone with the link can edit it): escape every value,
-// and build links only from the config and the row number.
+// Everything read from the Sheet is untrusted (anyone with the link can edit it). Nothing typed there is
+// shown: names come from ORGANIZATIONS in data.js by org_id (unknown organizations are dropped), dates are
+// shown only when valid, links are built only from the config and the row number, and each group is capped.
 (function () {
   const L = window.CampLib;
   const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const GROUPS = [['quick', '2 minutes'], ['medium', '10 minutes'], ['long', '30–60 minutes']];
 
   const LIVE_TIMEOUT_MS = 8000;
+  const GROUP_LIMIT = 50;
 
   const el = id => document.getElementById(id);
 
@@ -38,7 +40,7 @@
 
   async function loadLive(config) {
     try {
-      const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(config.sheet_id) + '/gviz/tq?tqx=out:csv&sheet=Tasks';
+      const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(config.sheet_id) + '/gviz/tq?tqx=out:csv&headers=1&sheet=Tasks';
       return parseTasks(await fetchText(url, LIVE_TIMEOUT_MS));
     } catch (e) {
       return null;
@@ -68,8 +70,8 @@
   }
 
   function taskHtml(task, config) {
-    const name = L.escapeHtml(task.org_name || task.org_id || 'Unnamed organization');
-    const due = L.validIso(task.due) ? '<span class="task-due">Registration opens ' + L.escapeHtml(shortDate(task.due)) + '</span>' : '';
+    const name = L.escapeHtml(task.org_name);
+    const due = L.validIso(task.due) ? '<span class="task-due">Expected around ' + L.escapeHtml(shortDate(task.due)) + '</span>' : '';
     return '<li class="task-item"><div class="task-info"><strong class="task-name">' + name + '</strong>' + due + '</div>' +
       '<a class="link-btn" href="' + L.escapeHtml(sheetLink(config, task.row)) + '" target="_blank" rel="noopener">Open in the Sheet</a></li>';
   }
@@ -83,7 +85,15 @@
     return n + ' ' + year + ' programs are live on the site.';
   }
 
-  function render(config, tasks, savedCopy) {
+  function groupHtml(list, config) {
+    if (!list.length) return '<p class="task-empty">Nothing open here right now.</p>';
+    const more = list.length - GROUP_LIMIT;
+    return '<ul class="task-list">' + list.slice(0, GROUP_LIMIT).map(t => taskHtml(t, config)).join('') + '</ul>' +
+      (more > 0 ? '<p class="task-empty">and ' + more + ' more</p>' : '');
+  }
+
+  function render(config, sheetTasks, savedCopy) {
+    const tasks = L.boardTasks(sheetTasks, typeof ORGANIZATIONS === 'undefined' ? [] : ORGANIZATIONS);
     if (savedCopy) {
       const when = savedCopy.savedOn ? ' Saved ' + shortDate(savedCopy.savedOn) + '.' : '';
       el('boardSource').textContent = 'Showing the last saved copy.' + when;
@@ -97,11 +107,7 @@
     const g = L.groupTasks(tasks);
     el('boardProgress').textContent = g.counts.done + ' of ' + g.counts.total + ' tasks done · ' + g.counts.claimed + ' in progress';
     el('boardGroups').innerHTML = GROUPS.map(([key, title]) =>
-      '<section class="task-group"><h2>' + title + '</h2>' +
-      (g[key].length
-        ? '<ul class="task-list">' + g[key].map(t => taskHtml(t, config)).join('') + '</ul>'
-        : '<p class="task-empty">Nothing open here right now.</p>') +
-      '</section>').join('');
+      '<section class="task-group"><h2>' + title + '</h2>' + groupHtml(g[key], config) + '</section>').join('');
   }
 
   async function boot() {

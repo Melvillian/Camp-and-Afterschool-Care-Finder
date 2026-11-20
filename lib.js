@@ -208,5 +208,13 @@
     return { quick: quick.sort(cmp), medium: medium.sort(cmp), long: long.sort(cmp), counts };
   }
 
-  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, parseCsvRows, groupTasks, validIso };
+  // The tasks the board may show: only those whose org_id is an organization in the site's data, each named
+  // from that data. The Sheet's org_name is never used: anyone with the link can type in it.
+  function boardTasks(tasks, organizations) {
+    const names = new Map((organizations || []).map(o => [String(o.orgId), String(o.name || o.orgId)]));
+    const id = t => String(t.org_id === undefined ? '' : t.org_id).trim();
+    return tasks.filter(t => names.has(id(t))).map(t => Object.assign({}, t, { org_name: names.get(id(t)) }));
+  }
+
+  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, parseCsvRows, groupTasks, boardTasks, validIso };
 });

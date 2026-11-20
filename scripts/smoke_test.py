@@ -19,13 +19,15 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "data.fixture.js"
 MAC_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
+TASKS_HEADER = "task_id,org_id,org_name,kind,minutes,due,source_url,status,claimed_by,claimed_on,volunteer_notes\n"
 TASKS_FIXTURE = (
-    "task_id,org_id,org_name,kind,minutes,due,source_url,status,claimed_by,claimed_on,volunteer_notes\n"
-    "t1,a,Alpha Camp,find_page,2,,,open,,,\n"
+    TASKS_HEADER +
+    "t1,fixture-org,Typed Alpha,find_page,2,,,open,,,\n"
     ",,,,,,,,,,\n"
-    "t2,b,<i>Evil</i> Org,check_draft,10,2027-02-04,https://example.org/b,open,,,\n"
-    "t3,c,Gamma Camp,enter_new,45,,,open,,,\n"
-    "t4,d,Delta Camp,check_draft,10,,,claimed,Zed Volunteer,2027-01-12,\n"
+    "t2,reg-org,<i>Evil</i> Org,check_draft,10,2027-02-04,https://example.org/b,open,,,\n"
+    "t3,fixture-org,Gamma Camp,enter_new,45,,,open,,,\n"
+    "t4,reg-org,Delta Camp,check_draft,10,,,claimed,Zed Volunteer,2027-01-12,\n"
+    "t5,not-an-org,Spam Org,find_page,2,,,open,,,\n"
 )
 
 failures = []
@@ -151,15 +153,23 @@ def main():
             check("board: snapshot note", "Showing the last saved copy. Saved Jan 12." in dom)
             check("board: sheet link", "edit#gid=0&amp;range=A2" in dom or "edit#gid=0&range=A2" in dom)
             check("board: link keeps its row after a blank row", "range=A4" in dom.replace("&amp;", "&") and "range=A3" not in dom.replace("&amp;", "&"))
+            board = dom.split('id="board"', 1)[-1].split('id="howItWorks"', 1)[0]
             check("board: names not shown", "Zed Volunteer" not in dom)
-            check("board: claimed task not listed", "Delta Camp" not in dom)
-            check("board: escaped", "&lt;i&gt;Evil&lt;/i&gt; Org" in dom)
-            check("board: due date", "Registration opens Feb 4" in dom)
+            check("board: claimed task not listed", board.count('class="task-item"') == 3)
+            check("board: names come from the site's data", "Reg Org" in board and "Fixture Org" in board)
+            check("board: Sheet-typed names not shown", not any(t in dom for t in ("Evil", "Typed Alpha", "Gamma Camp", "Delta Camp", "Spam Org")))
+            check("board: unknown organization dropped", "range=A7" not in dom.replace("&amp;", "&"))
+            check("board: due date", "Expected around Feb 4" in dom and "Registration opens" not in board)
             check("board: link opens new tab safely", 'target="_blank"' in dom and 'rel="noopener"' in dom)
             check("board: season programs sentence", "No 2027 programs are live on the site yet." in dom)
             check("board: how this works", "How this works" in dom and "Art Camp, July 5-9" in dom)
             dom = dump_dom("volunteer.html?source=snapshot", replace=(('"programYear": "2099"', '"programYear": "2027"'),))
             check("board: season programs counted", "1 2027 program is live on the site." in dom)
+            tasks_csv = Path(site) / "data" / "staging" / "2027" / "sheet" / "tasks.csv"
+            tasks_csv.write_text(TASKS_HEADER + "".join(f"t{i},fixture-org,,find_page,2,,,open,,,\n" for i in range(53)), encoding="utf-8")
+            dom = dump_dom("volunteer.html?source=snapshot")
+            check("board: a group shows at most 50 tasks", dom.count('class="task-item"') == 50 and "and 3 more" in dom)
+            tasks_csv.write_text(TASKS_FIXTURE, encoding="utf-8")
             dom = dump_dom("index.html")
             check("nav: volunteer link", 'href="volunteer.html"' in dom)
             (Path(site) / "data" / "staging" / "2027" / "sheet" / "snapshot.json").unlink()

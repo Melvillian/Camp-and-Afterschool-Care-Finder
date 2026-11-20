@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, parseCsvRows, groupTasks } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, parseCsvRows, groupTasks, boardTasks } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -171,4 +171,14 @@ test('groupTasks ignores case and stray spaces in status', () => {
   const g = groupTasks([{ task_id: 'a', minutes: '2', status: ' Open ' }, { task_id: 'b', minutes: '2', status: 'Done ' }]);
   assert.deepEqual(g.quick.map(x => x.task_id), ['a']);
   assert.deepEqual(g.counts, { open: 1, claimed: 0, done: 1, needs_help: 0, total: 2 });
+});
+
+test('boardTasks names tasks from the site data and drops unknown organizations', () => {
+  const orgs = [{ orgId: 'o1', name: 'Org One' }, { orgId: 'o2', name: 'Org Two' }];
+  const tasks = [{ task_id: 'a', org_id: 'o1', org_name: '<i>Typed</i>', row: 2 }, { task_id: 'b', org_id: 'zz', org_name: 'Spam' },
+    { task_id: 'c', org_id: ' o2 ', org_name: '' }, { task_id: 'd' }];
+  const out = boardTasks(tasks, orgs);
+  assert.deepEqual(out.map(t => [t.task_id, t.org_name, t.row]), [['a', 'Org One', 2], ['c', 'Org Two', undefined]]);
+  assert.equal(tasks[0].org_name, '<i>Typed</i>');
+  assert.deepEqual(boardTasks(tasks, undefined), []);
 });
