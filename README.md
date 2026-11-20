@@ -16,6 +16,16 @@ Then open `http://localhost:8000`. For live reload while editing:
 python scripts/dev_server.py
 ```
 
+## Tests
+
+```bash
+node --test tests/js/
+python3 -m unittest discover -s tests/py
+python3 scripts/smoke_test.py
+```
+
+The smoke test drives headless Chrome against the site with a fixture `data.js`, so Chrome is required (set `CHROME` to override the path).
+
 ## Data pipeline
 
 All program and organization data lives in two CSV files:

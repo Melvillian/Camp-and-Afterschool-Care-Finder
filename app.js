@@ -13,15 +13,12 @@ let exportSelectionOrder = [];
 const TODAY = new Date().toISOString().slice(0, 10);
 
 function isPast(p) {
-  if (p.endDate) return p.endDate < TODAY;
-  if (p.startDate) return p.startDate < TODAY;
-  return false;
+  return CampLib.isPast(p, TODAY);
 }
 
-function programYear(p) {
-  const d = p.endDate || p.startDate;
-  return d ? d.slice(0, 4) : null;
-}
+// uid -> 'current' | 'lastSeason' | 'hidden', computed once in init()
+let visibility = new Map();
+
 // Org lookup keyed by orgId, populated synchronously from data.js ORGANIZATIONS
 const orgMap = new Map(
   (typeof ORGANIZATIONS !== 'undefined' ? ORGANIZATIONS : []).map(o => [o.orgId, o])
@@ -39,7 +36,7 @@ let activeFilters = {
   county: '',
   stars: '',
   status: '',
-  data: '',
+  date: '',
   showPast: false
 };
 
@@ -75,6 +72,7 @@ const groupStatus = document.getElementById('groupStatus');
 
 const cardsGrid = document.getElementById('cardsGrid');
 const resultsCount = document.getElementById('resultsCount');
+const seasonNotice = document.getElementById('seasonNotice');
 const noResults = document.getElementById('noResults');
 const noResultsTitle = document.getElementById('noResultsTitle');
 const noResultsHint = document.getElementById('noResultsHint');
@@ -325,7 +323,7 @@ function applyFilters() {
   const isCamp = activeCategory === 'camp';
 
   let results = categoryPrograms().filter(p => {
-    if (!activeFilters.showPast && isPast(p)) return false;
+    if (!activeFilters.showPast && visibility.get(p.uid) === 'hidden') return false;
 
     if (search) {
       const haystack = [
@@ -410,7 +408,7 @@ function clearExportSelection() {
 
 function refreshExportUiForUid(uid) {
   if (currentView === 'list') {
-    const card = cardsGrid.querySelector(`article.program-card[data-export-uid="${uid}"]`);
+    const card = cardsGrid.querySelector(`article.program-card[data-export-uid="${CSS.escape(uid)}"]`);
     if (card) {
       const cb = card.querySelector('.card-export-checkbox');
       const sel = isExportSelected(uid);
@@ -502,7 +500,7 @@ function downloadExportCsv() {
     if (!p) return;
   
     const subjects = (p.subjects || []).join('; ');
-    const address = `${p.address}, ${p.city}, ${p.county}, ${p.state} ${p.zip}`;
+    const address = CampLib.formatAddress(p);
     const hoursParts = (p.hours || '').split(/\s*[–\-]\s*/);
     const startTime  = p.startTime || (hoursParts[0] || '').trim();
     const endTime    = p.endTime   || (hoursParts[1] || '').trim();
@@ -575,7 +573,7 @@ function renderCards(programs) {
       ? '<span class="free-badge">Free (Federally Funded)</span>'
       : (!p.cost || p.cost === 0)
         ? '<span class="free-badge">Contact for pricing</span>'
-        : `<span>${formatCost(p.cost, p.costPeriod)}</span>`;
+        : `<span>${CampLib.escapeHtml(formatCost(p.cost, p.costPeriod))}</span>`;
 
     const scholarshipHtml = p.scholarshipAvailable
       ? '<span class="scholarship-badge">Aid Available</span>'
@@ -592,17 +590,18 @@ function renderCards(programs) {
           return `<span class="reg-opens-badge">Reg opens ${MONTH_ABBR[next.getMonth()]} ${next.getDate()}</span>`;
         })();
 
-    const subjectTags = (p.subjects || []).slice(0, 3).map(s => `<span class="tag">${s}</span>`).join('');
+    const subjectTags = (p.subjects || []).slice(0, 3).map(s => `<span class="tag">${CampLib.escapeHtml(s)}</span>`).join('');
     const locationText = [p.city, p.state].filter(Boolean).join(', ') || 'Vermont';
     const gradesText = (p.gradesMin && p.gradesMax)
       ? `Grades ${p.gradesMin}-${p.gradesMax}`
       : (p.ageMin !== null && p.ageMax !== null ? `Ages ${p.ageMin}-${p.ageMax}` : '');
 
+    const site = CampLib.safeUrl(p.website);
     const weekBadgeHtml = p.startDate
       ? `<span class="week-badge">${fmtWeekRange(p.startDate, p.endDate)}</span>`
       : '';
 
-    const pYear = past ? programYear(p) : null;
+    const pYear = past ? CampLib.seasonYear(p) : null;
     const yearChipHtml = pYear
       ? `<span class="year-chip">${pYear}</span>`
       : '';
@@ -610,31 +609,31 @@ function renderCards(programs) {
     card.innerHTML = `
       <div class="card-header">
         <div class="card-header-top">
-          <span class="card-type-badge ${badgeClass}">${p.type}</span>
+          <span class="card-type-badge ${badgeClass}">${CampLib.escapeHtml(p.type)}</span>
           ${yearChipHtml}${weekBadgeHtml}
         </div>
-        <div class="card-title">${p.name}</div>
-        <div class="card-org">${p.organization || ''}</div>
+        <div class="card-title">${CampLib.escapeHtml(p.name)}</div>
+        <div class="card-org">${CampLib.escapeHtml(p.organization)}</div>
       </div>
       <div class="card-body">
-        <p class="card-description">${p.description || ''}</p>
+        <p class="card-description">${CampLib.escapeHtml(p.description)}</p>
         <div class="card-meta">
-          <div class="meta-item"><span class="meta-icon">📍</span><span class="meta-value">${locationText}</span></div>
-          ${p.county ? `<div class="meta-item"><span class="meta-icon">🧭</span><span class="meta-value">${p.county} County</span></div>` : ''}
-          ${gradesText ? `<div class="meta-item"><span class="meta-icon">🎓</span><span class="meta-value">${gradesText}</span></div>` : ''}
-          ${p.hours ? `<div class="meta-item"><span class="meta-icon">🕐</span><span class="meta-value">${p.hours}</span></div>` : ''}
+          <div class="meta-item"><span class="meta-icon">📍</span><span class="meta-value">${CampLib.escapeHtml(locationText)}</span></div>
+          ${p.county ? `<div class="meta-item"><span class="meta-icon">🧭</span><span class="meta-value">${CampLib.escapeHtml(p.county)} County</span></div>` : ''}
+          ${gradesText ? `<div class="meta-item"><span class="meta-icon">🎓</span><span class="meta-value">${CampLib.escapeHtml(gradesText)}</span></div>` : ''}
+          ${p.hours ? `<div class="meta-item"><span class="meta-icon">🕐</span><span class="meta-value">${CampLib.escapeHtml(p.hours)}</span></div>` : ''}
           <div class="meta-item"><span class="meta-icon">💰</span><span class="meta-value">${costDisplay} ${scholarshipHtml}</span></div>
-          ${p.starsLevel ? `<div class="meta-item"><span class="meta-icon">⭐</span><span class="meta-value">${p.starsLevel}</span></div>` : ''}
+          ${p.starsLevel ? `<div class="meta-item"><span class="meta-icon">⭐</span><span class="meta-value">${CampLib.escapeHtml(p.starsLevel)}</span></div>` : ''}
         </div>
         <div class="tags">${subjectTags}</div>
       </div>
       <div class="card-footer">
         <label class="card-export-label">
-          <input type="checkbox" class="card-export-checkbox" data-uid="${p.uid}" ${exportSel ? 'checked' : ''} aria-label="Save program for export" />
+          <input type="checkbox" class="card-export-checkbox" data-uid="${CampLib.escapeHtml(p.uid)}" ${exportSel ? 'checked' : ''} aria-label="Save program for export" />
           <span>Save for export</span>
         </label>
-        <button type="button" class="btn-details" data-id="${p.uid}">View Details</button>
-        ${p.website ? `<a class="btn-website" href="${p.website}" target="_blank" rel="noopener noreferrer">Visit Website</a>` : ''}
+        <button type="button" class="btn-details" data-id="${CampLib.escapeHtml(p.uid)}">View Details</button>
+        ${site ? `<a class="btn-website" href="${CampLib.escapeHtml(site)}" target="_blank" rel="noopener noreferrer">Visit Website</a>` : ''}
         ${registrationHtml}
       </div>
     `;
@@ -713,7 +712,7 @@ function renderCalendar(programs) {
     html += `<div class="cal-day-num">${day}</div>`;
     dayProgs.slice(0, 3).forEach(p => {
       const label = p.name.length > 22 ? `${p.name.slice(0, 22)}...` : p.name;
-      html += `<button class="cal-camp-badge" data-id="${p.uid}" title="${p.name}">${label}</button>`;
+      html += `<button class="cal-camp-badge" data-id="${CampLib.escapeHtml(p.uid)}" title="${CampLib.escapeHtml(p.name)}">${CampLib.escapeHtml(label)}</button>`;
     });
     if (dayProgs.length > 3) html += `<span class="cal-more">+${dayProgs.length - 3} more</span>`;
     html += '</div>';
@@ -737,33 +736,35 @@ function renderCalendar(programs) {
 }
 
 // ===== Map =====
-const CITY_COORDS = {
-  'Burlington': [44.4759, -73.2121],
-  'South Burlington': [44.4667, -73.1710],
-  'Winooski': [44.4918, -73.1873],
-  'Shelburne': [44.3762, -73.2293],
-  'Williston': [44.4270, -73.0618],
-  'Essex': [44.4918, -73.1124],
-  'Essex Junction': [44.4918, -73.1124],
-  'Colchester': [44.5454, -73.1543],
-  'Milton': [44.6078, -73.1076],
-  'Richmond': [44.4040, -72.9996],
-  'Hinesburg': [44.3351, -73.1152],
-  'Charlotte': [44.3090, -73.2565],
-  'St Albans': [44.8117, -73.0832],
-  'St. Albans': [44.8117, -73.0832],
-  'Montpelier': [44.2601, -72.5754],
-  'Middlebury': [44.0145, -73.1673],
-  'Brattleboro': [42.8509, -72.5579],
-  'Rutland': [43.6106, -72.9726],
-  'St Johnsbury': [44.4196, -72.0162],
-  'St. Johnsbury': [44.4196, -72.0162],
-  'White River Junction': [43.6493, -72.3193]
-};
-
 const VT_BOUNDS = [[42.73, -73.44], [45.02, -71.46]];
 
+function updateMapUnplacedNote(programs) {
+  const townCoords = typeof TOWN_COORDS !== 'undefined' ? TOWN_COORDS : {};
+  const unplaced = programs.filter(p => !p.city || !townCoords[p.city]).length;
+  const note = document.getElementById('mapUnplacedNote');
+  if (unplaced > 0) {
+    note.textContent = unplaced === 1
+      ? '1 result has no mapped town and is not shown on the map.'
+      : `${unplaced} results have no mapped town and are not shown on the map.`;
+    note.style.display = '';
+  } else {
+    note.style.display = 'none';
+  }
+}
+
+// Update the note right away (it does not need Leaflet's layout), then draw the map.
+function scheduleMapRender() {
+  updateMapUnplacedNote(lastFiltered);
+  // Double RAF: ensures Leaflet container has real pixel dimensions before rendering
+  requestAnimationFrame(() => requestAnimationFrame(() => renderMap(lastFiltered)));
+}
+
 function renderMap(programs) {
+  const townCoords = typeof TOWN_COORDS !== 'undefined' ? TOWN_COORDS : {};
+  updateMapUnplacedNote(programs);
+
+  if (typeof L === 'undefined') return;
+
   if (!mapInstance) {
     mapInstance = L.map('mapContainer', {
       maxBounds: VT_BOUNDS,
@@ -789,7 +790,7 @@ function renderMap(programs) {
   });
 
   Object.entries(cityGroups).forEach(([city, progs]) => {
-    const coords = CITY_COORDS[city];
+    const coords = townCoords[city];
     if (!coords) return;
 
     const radius = Math.min(8 + progs.length * 1.6, 30);
@@ -801,11 +802,11 @@ function renderMap(programs) {
       weight: 2
     });
 
-    const list = progs.slice(0, 8).map(p => `<li><a href="#" data-id="${p.uid}" style="color:#2a7d4f;font-weight:600;">${p.name}</a></li>`).join('');
+    const list = progs.slice(0, 8).map(p => `<li><a href="#" data-id="${CampLib.escapeHtml(p.uid)}" style="color:#2a7d4f;font-weight:600;">${CampLib.escapeHtml(p.name)}</a></li>`).join('');
     const more = progs.length > 8 ? `<li style="color:#6c757d;font-size:0.8rem;">+${progs.length - 8} more...</li>` : '';
 
     marker.bindPopup(`
-      <strong style="font-size:0.95rem;">${city}</strong>
+      <strong style="font-size:0.95rem;">${CampLib.escapeHtml(city)}</strong>
       <span style="color:#6c757d;font-size:0.8rem;"> - ${progs.length} result${progs.length !== 1 ? 's' : ''}</span>
       <ul style="margin:0.4rem 0 0;padding-left:1rem;font-size:0.85rem;">${list}${more}</ul>
     `);
@@ -908,12 +909,13 @@ function openModal(p) {
 
   const tagsContainer = document.getElementById('modalSubjects');
   tagsContainer.innerHTML = (p.subjects || []).length
-    ? p.subjects.map(s => `<span class="tag">${s}</span>`).join('')
+    ? p.subjects.map(s => `<span class="tag">${CampLib.escapeHtml(s)}</span>`).join('')
     : '<span style="color:var(--gray-600);font-size:0.85rem;">No tags available</span>';
 
   const websiteLink = document.getElementById('modalWebsiteLink');
-  if (p.website) {
-    websiteLink.href = p.website;
+  const site = CampLib.safeUrl(p.website);
+  if (site) {
+    websiteLink.href = site;
     websiteLink.style.display = '';
   } else {
     websiteLink.style.display = 'none';
@@ -935,9 +937,9 @@ function openModal(p) {
       const org = orgMap.get(p.orgId);
       const orgLabel = org ? org.name : (p.orgName || 'this organization');
       orgSection.innerHTML = `
-        <h4 class="modal-org-heading">More from ${orgLabel}</h4>
+        <h4 class="modal-org-heading">More from ${CampLib.escapeHtml(orgLabel)}</h4>
         <ul class="modal-org-list">
-          ${siblings.slice(0, 6).map(q => `<li><button class="modal-org-link" data-uid="${q.uid}">${q.name}</button></li>`).join('')}
+          ${siblings.slice(0, 6).map(q => `<li><button class="modal-org-link" data-uid="${CampLib.escapeHtml(q.uid)}">${CampLib.escapeHtml(q.name)}</button></li>`).join('')}
           ${siblings.length > 6 ? `<li class="modal-org-more">+${siblings.length - 6} more</li>` : ''}
         </ul>`;
       orgSection.querySelectorAll('.modal-org-link').forEach(btn => {
@@ -978,8 +980,7 @@ function switchView(view) {
 
   if (view === 'list') renderCards(lastFiltered);
   else if (view === 'calendar') renderCalendar(lastFiltered);
-  // Double RAF: ensures Leaflet container has real pixel dimensions before rendering
-  else requestAnimationFrame(() => requestAnimationFrame(() => renderMap(lastFiltered)));
+  else scheduleMapRender();
 }
 
 function update() {
@@ -989,8 +990,7 @@ function update() {
 
   if (currentView === 'list') renderCards(lastFiltered);
   else if (currentView === 'calendar') renderCalendar(lastFiltered);
-  // Double RAF: ensures Leaflet container has real pixel dimensions before rendering
-  else requestAnimationFrame(() => requestAnimationFrame(() => renderMap(lastFiltered)));
+  else scheduleMapRender();
 }
 
 function clearAllFilters() {
@@ -1005,8 +1005,9 @@ function clearAllFilters() {
     scholarship: '',
     county: '',
     stars: '',
+    status: '',
     date: '',
-    status: ''
+    showPast: false
   };
 
   searchInput.value = '';
@@ -1020,7 +1021,7 @@ function clearAllFilters() {
   filterCounty.value = '';
   filterStars.value = '';
   filterStatus.value = '';
-  filterDate.value = '';
+  if (filterDate) filterDate.value = '';
   filterShowPast.checked = false;
   activeFilters.showPast = false;
 }
@@ -1051,10 +1052,12 @@ btnReset.addEventListener('click', () => {
   update();
 });
 
-filterDate.addEventListener('change', e => {
-  activeFilters.date = e.target.value; // back to "YYYY-MM-DD" when cleared
-  update();
-});
+if (filterDate) {
+  filterDate.addEventListener('change', e => {
+    activeFilters.date = e.target.value; // back to "YYYY-MM-DD" when cleared
+    update();
+  });
+}
 
 modalClose.addEventListener('click', closeModal);
 document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
@@ -1142,11 +1145,19 @@ function filterCampsByDate(programs, selectedDateString) {
 // ===== Boot =====
 function init() {
   allPrograms = typeof PROGRAMS !== 'undefined' ? PROGRAMS : [];
+  visibility = CampLib.defaultVisibility(categoryPrograms(), TODAY);
+  const seasonYear = CampLib.lastSeasonYear(categoryPrograms(), visibility);
+  if (seasonYear) {
+    seasonNotice.textContent = `Listings marked ${seasonYear} are last season's, shown for reference until that camp posts new dates.`;
+    seasonNotice.classList.remove('hidden');
+  }
   applyCategoryUiText();
   updateFilterVisibility();
   populateFiltersForCategory();
   update();
   renderExportPanel();
+  if (location.hash === '#map') switchView('map');
+  else if (location.hash === '#calendar') switchView('calendar');
 }
 
 init();

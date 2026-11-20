@@ -15,39 +15,15 @@ See data/Vermont_Town_GEOID_RPC_County.geojson for the canonical list.
 """
 
 import csv
-import json
+import sys
 from pathlib import Path
 from collections import Counter
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from vt_towns import CITY_ALIASES, load_town_county_map  # noqa: F401
+
 PROGRAMS_PATH = Path("data/programs.csv")
 ORGS_PATH = Path("data/organizations.csv")
-GEOJSON_PATH = Path("data/Vermont_Town_GEOID_RPC_County.geojson")
-
-# Additional aliases for common alternate spellings not in the GeoJSON
-CITY_ALIASES = {
-    "St. Albans": "Saint Albans City",
-    "Saint Albans": "Saint Albans City",
-    "Barre": "Barre City",
-    "Hyde Park": "Hyde Park",  # Lamoille County
-}
-
-
-def load_town_county_map():
-    with GEOJSON_PATH.open(encoding="utf-8") as f:
-        gj = json.load(f)
-    mapping = {}
-    for feat in gj["features"]:
-        props = feat["properties"]
-        town = (props.get("TOWNNAMEMC") or props.get("Municipal_Name") or "").strip()
-        county = (props.get("County") or "").strip()
-        if town and county:
-            mapping[town] = county
-    # Add aliases
-    for alias, canonical in CITY_ALIASES.items():
-        if canonical in mapping:
-            mapping[alias] = mapping[canonical]
-    return mapping
-
 
 def main():
     town_county = load_town_county_map()

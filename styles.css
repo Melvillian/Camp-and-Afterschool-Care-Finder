@@ -727,6 +727,16 @@ main {
   color: var(--gray-600);
 }
 
+.season-notice {
+  font-size: 0.95rem;
+  color: var(--gray-600);
+  background: #fff8d6;
+  border: 1px solid #f0e2a0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
 .results-count strong {
   color: var(--text);
   font-weight: 700;

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin – Camp &amp; Afterschool Care Finder</title>
   <style>
@@ -234,6 +235,14 @@
       font-size: 0.78rem; font-weight: 600;
       padding: 0.2rem 0.7rem; border-radius: 20px;
       white-space: nowrap;
+    }
+
+    .local-edits-banner {
+      background: #fef3c7; color: #92400e;
+      font-size: 0.88rem; font-weight: 600;
+      padding: 0.6rem 1rem; border-radius: 8px;
+      margin-bottom: 0.75rem;
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
     }
 
     /* ===== Stats ===== */
@@ -860,6 +869,7 @@
     <p>Admin Tool – Camp &amp; Afterschool Care Finder &mdash; Save All writes to <code>data/programs.csv</code> and <code>data/organizations.csv</code> when running the dev server, then run <code>python scripts/build_data_js.py</code> to rebuild. Falls back to localStorage when not using the dev server.</p>
   </footer>
 
+  <script src="lib.js"></script>
   <script src="data.js"></script>
   <script>window.NAV_PAGE = 'admin';</script>
   <script src="nav.js"></script>
@@ -879,13 +889,38 @@
 
     // ===== State =====
     // Load programs from data.js PROGRAMS (preferred) or localStorage fallback
-    const _savedP = localStorage.getItem('adminProgramData');
-    const _savedO = localStorage.getItem('adminOrgData');
+    const LOCAL_KEYS = ['adminProgramData', 'adminOrgData', 'adminDataStamp', 'adminSavedAt'];
+    const CURRENT_STAMP = typeof DATA_GENERATED !== 'undefined' ? DATA_GENERATED : '';
+    const localEdits = CampLib.localEditsStatus({
+      programs: localStorage.getItem('adminProgramData'),
+      orgs:     localStorage.getItem('adminOrgData'),
+      stamp:    localStorage.getItem('adminDataStamp'),
+      savedAt:  localStorage.getItem('adminSavedAt'),
+    }, CURRENT_STAMP);
 
-    let campRows = (_savedP ? JSON.parse(_savedP) : null) ||
+    let campRows = localEdits.programs ||
                   (typeof PROGRAMS !== 'undefined' ? PROGRAMS : []);
-    let orgRows  = (_savedO ? JSON.parse(_savedO) : null) ||
+    let orgRows  = localEdits.orgs ||
                   (typeof ORGANIZATIONS !== 'undefined' ? [...ORGANIZATIONS] : []);
+
+    if (localEdits.useLocal) {
+      const when = localEdits.savedAt && !isNaN(new Date(localEdits.savedAt))
+        ? new Date(localEdits.savedAt).toLocaleString() : 'an earlier visit';
+      const banner = document.createElement('div');
+      banner.id = 'localEditsBanner';
+      banner.className = 'local-edits-banner';
+      banner.innerHTML =
+        `<span>${CampLib.escapeHtml(
+          `You are viewing edits saved in this browser on ${when}, not the published data.` +
+          (localEdits.stale ? ' The published data has changed since then.' : ''))}</span> ` +
+        `<button type="button" class="btn-secondary" id="btnDiscardLocal">Discard local edits</button>`;
+      const toolbar = document.querySelector('main .toolbar');
+      toolbar.parentNode.insertBefore(banner, toolbar);
+      document.getElementById('btnDiscardLocal').addEventListener('click', () => {
+        LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
+        location.reload();
+      });
+    }
 
     let activeView = 'programs'; // 'programs' | 'orgs'
     let sortCol    = 'name';
@@ -1487,6 +1522,8 @@
       // Always write to localStorage first as a backup
       localStorage.setItem('adminProgramData', JSON.stringify(campRows));
       localStorage.setItem('adminOrgData',     JSON.stringify(orgRows));
+      localStorage.setItem('adminDataStamp',   CURRENT_STAMP);
+      localStorage.setItem('adminSavedAt',     new Date().toISOString());
       isDirty = false;
       document.getElementById('dirtyBadge').style.display = 'none';
 
@@ -1530,8 +1567,7 @@
         ]);
         if (pr.ok && or.ok) {
           // Clear localStorage so the next page load uses the rebuilt data.js
-          localStorage.removeItem('adminProgramData');
-          localStorage.removeItem('adminOrgData');
+          LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
           btn.textContent = '✓ Saved to CSV';
         } else {
           btn.textContent = '✓ Saved (localStorage only)';

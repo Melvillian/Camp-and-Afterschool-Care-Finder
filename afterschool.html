@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Afterschool Programs – Camp &amp; Afterschool Care Finder</title>
   <meta name="description" content="Find afterschool programs for K–12 students in Vermont. Filter by grade, county, organization, and more." />
@@ -142,6 +143,8 @@
       </div>
     </section>
 
+    <p id="seasonNotice" class="season-notice hidden"></p>
+
     <!-- Results Header -->
     <div class="results-header">
       <div class="results-header-left">
@@ -182,6 +185,7 @@
     <!-- Map View -->
     <div id="mapView" style="display:none;">
       <div id="mapContainer" class="map-container"></div>
+      <p id="mapUnplacedNote" class="calendar-undated-note cal-undated-note" style="display:none"></p>
     </div>
 
     </div>
@@ -310,6 +314,7 @@
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="lib.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script>window.NAV_PAGE = 'afterschool';</script>
