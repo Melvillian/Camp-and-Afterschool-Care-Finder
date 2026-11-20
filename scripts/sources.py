@@ -239,7 +239,7 @@ def main(argv: list[str]) -> int:
         print(f"added {seed()} rows; {len(load())} total")
     elif cmd == "robots":
         res = robots(recheck="--recheck" in argv[2:])
-        print(f"{len(res)} hosts: {sum(v == 'TRUE' for v in res.values())} name AI crawlers, "
+        print(f"{len(res)} hosts: {sum(v == 'TRUE' for v in res.values())} turn AI crawlers away, "
               f"{sum(v == '' for v in res.values())} failed")
     elif cmd == "check":
         problems = check(load(), {o["org_id"] for o in _read_csv(ORGS_CSV)})
