@@ -502,7 +502,7 @@ function downloadExportCsv() {
     if (!p) return;
   
     const subjects = (p.subjects || []).join('; ');
-    const address = `${p.address}, ${p.city}, ${p.county}, ${p.state} ${p.zip}`;
+    const address = CampLib.formatAddress(p);
     const hoursParts = (p.hours || '').split(/\s*[–\-]\s*/);
     const startTime  = p.startTime || (hoursParts[0] || '').trim();
     const endTime    = p.endTime   || (hoursParts[1] || '').trim();

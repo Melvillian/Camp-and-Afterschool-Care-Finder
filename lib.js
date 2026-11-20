@@ -21,5 +21,12 @@
     return /^https?:\/\//i.test(v) ? v : '';
   }
 
-  return { escapeHtml, safeUrl };
+  // "street, city, ST zip", skipping blank parts.
+  function formatAddress(p) {
+    const clean = v => (v === null || v === undefined ? '' : String(v).trim());
+    const stateZip = [clean(p.state), clean(p.zip)].filter(Boolean).join(' ');
+    return [clean(p.address), clean(p.city), stateZip].filter(Boolean).join(', ');
+  }
+
+  return { escapeHtml, safeUrl, formatAddress };
 });

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -18,4 +18,11 @@ test('safeUrl allows only http and https', () => {
   assert.equal(safeUrl('data:text/html,x'), '');
   assert.equal(safeUrl(''), '');
   assert.equal(safeUrl(null), '');
+});
+test('formatAddress joins the parts that exist', () => {
+  assert.equal(formatAddress({ address: '1 Main St', city: 'Burlington', state: 'VT', zip: '05401' }),
+    '1 Main St, Burlington, VT 05401');
+  assert.equal(formatAddress({ address: '', city: 'Hinesburg', state: 'VT', zip: '' }), 'Hinesburg, VT');
+  assert.equal(formatAddress({ address: '  ', city: '', state: '', zip: '' }), '');
+  assert.equal(formatAddress({}), '');
 });
