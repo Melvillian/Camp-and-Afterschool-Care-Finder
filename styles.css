@@ -1616,3 +1616,22 @@ footer {
 .reg-soon-open { font-weight: 600; color: #2a7d4f; }
 .reg-soon-note { flex-basis: 100%; color: var(--gray-600, #555); }
 .reg-soon-more { margin-top: 0.6rem; background: none; border: 1px solid var(--gray-200); border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer; font: inherit; }
+
+/* ===== Volunteer task board ===== */
+.board-progress { font-weight: 600; }
+.board-source { color: var(--gray-600); font-size: 0.9rem; }
+.task-group { margin-top: 1.5rem; }
+.task-list { list-style: none; margin: 0; padding: 0; }
+.task-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--gray-200);
+}
+.task-info { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; overflow-wrap: anywhere; }
+.task-due { font-size: 0.9rem; color: var(--gray-600); }
+.task-item .link-btn { margin: 0; }
+.task-empty { color: var(--gray-600); }

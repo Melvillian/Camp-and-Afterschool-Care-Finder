@@ -147,5 +147,56 @@
     return out.sort((a, b) => a.sortDate < b.sortDate ? -1 : a.sortDate > b.sortDate ? 1 : String(a.name).localeCompare(String(b.name)));
   }
 
-  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList };
+  // RFC 4180 CSV -> array of objects keyed by the header row. Fully blank rows are dropped.
+  function parseCsv(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    const src = String(text || '').replace(/^\ufeff/, '');
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (src[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+        } else field += c;
+      } else if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && src[i + 1] === '\n') i++;
+        row.push(field); rows.push(row); row = []; field = '';
+      } else field += c;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    const kept = rows.filter(r => r.some(v => v.trim() !== ''));
+    if (!kept.length) return [];
+    const header = kept[0].map(h => h.trim());
+    return kept.slice(1).map(r => {
+      const o = {};
+      header.forEach((h, i) => { o[h] = r[i] === undefined ? '' : r[i]; });
+      return o;
+    });
+  }
+
+  // Open tasks by time (<=5, 6-15, longer or unreadable), each by due date (blank or invalid last), then org name.
+  // Tasks with a status other than the four known ones count in total only.
+  function groupTasks(tasks) {
+    const counts = { open: 0, claimed: 0, done: 0, needs_help: 0, total: tasks.length };
+    const quick = [], medium = [], long = [];
+    tasks.forEach(t => {
+      if (!Object.prototype.hasOwnProperty.call(counts, t.status) || t.status === 'total') return;
+      counts[t.status]++;
+      if (t.status !== 'open') return;
+      const raw = String(t.minutes === undefined ? '' : t.minutes).trim();
+      const m = /^\d+(\.\d+)?$/.test(raw) ? Number(raw) : NaN;
+      (m <= 5 ? quick : m <= 15 ? medium : long).push(t);
+    });
+    const due = t => (validIso(t.due) ? t.due : '');
+    const cmp = (a, b) => {
+      const da = due(a), db = due(b);
+      if (da !== db) return da === '' ? 1 : db === '' ? -1 : da < db ? -1 : 1;
+      return String(a.org_name || '').localeCompare(String(b.org_name || ''));
+    };
+    return { quick: quick.sort(cmp), medium: medium.sort(cmp), long: long.sort(cmp), counts };
+  }
+
+  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, groupTasks, validIso };
 });

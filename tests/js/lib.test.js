@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, groupTasks } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -133,4 +133,32 @@ test('registrationList: only an early date', () => {
 test('registrationList: boundary is 30 days inclusive', () => {
   assert.equal(registrationList([O('a', '', '2026-12-21')], T2).length, 1);
   assert.equal(registrationList([O('a', '', '2026-12-20')], T2).length, 0);
+});
+
+test('parseCsv handles quotes, commas, newlines and CRLF', () => {
+  const rows = parseCsv('a,b\r\n1,"x, y"\r\n2,"line1\nline2"\r\n3,"say ""hi"""\r\n,\r\n');
+  assert.deepEqual(rows, [{ a: '1', b: 'x, y' }, { a: '2', b: 'line1\nline2' }, { a: '3', b: 'say "hi"' }]);
+  assert.deepEqual(parseCsv(''), []);
+});
+test('parseCsv tolerates a BOM, a missing final newline and short rows', () => {
+  assert.deepEqual(parseCsv('\ufeffa,b\n1'), [{ a: '1', b: '' }]);
+});
+test('groupTasks buckets open tasks by time and sorts by due date', () => {
+  const t = (task_id, minutes, status, due = '', org_name = task_id) => ({ task_id, minutes, status, due, org_name });
+  const g = groupTasks([t('a', '2', 'open'), t('b', '10', 'open', '2027-02-04'), t('c', '10', 'open', '2027-01-12'),
+    t('d', '10', 'open'), t('e', '45', 'open'), t('f', '10', 'claimed'), t('g', '10', 'done'), t('h', '2', 'needs_help')]);
+  assert.deepEqual(g.quick.map(x => x.task_id), ['a']);
+  assert.deepEqual(g.medium.map(x => x.task_id), ['c', 'b', 'd']);
+  assert.deepEqual(g.long.map(x => x.task_id), ['e']);
+  assert.deepEqual(g.counts, { open: 5, claimed: 1, done: 1, needs_help: 1, total: 8 });
+});
+test('groupTasks: boundaries, bad minutes, unknown status, ties by org name', () => {
+  const t = (task_id, minutes, status, due = '', org_name = task_id) => ({ task_id, minutes, status, due, org_name });
+  const g = groupTasks([t('m5', '5', 'open'), t('m6', '6', 'open'), t('m15', '15', 'open'), t('m16', '16', 'open'),
+    t('bad', 'soon', 'open'), t('empty', '', 'open'), t('odd', '2', 'Open'), t('zed', '10', 'open', '2027-01-01', 'Zed'),
+    t('amy', '10', 'open', '2027-01-01', 'Amy'), t('junk', '10', 'open', 'next week', 'Junk')]);
+  assert.deepEqual(g.quick.map(x => x.task_id), ['m5']);
+  assert.deepEqual(g.medium.map(x => x.task_id), ['amy', 'zed', 'junk', 'm15', 'm6']);
+  assert.deepEqual(g.long.map(x => x.task_id), ['bad', 'empty', 'm16']);
+  assert.deepEqual(g.counts, { open: 9, claimed: 0, done: 0, needs_help: 0, total: 10 });
 });
