@@ -15,6 +15,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import ingest_config
 import validate_data
@@ -30,7 +31,7 @@ def _read_header(path: Path) -> list[str]:
 PROGRAM_COLUMNS = _read_header(ROOT / "data" / "programs.csv")
 EXTRA = ["review", "source_url", "source_quote", "extracted_on"]
 STAGING_COLUMNS = PROGRAM_COLUMNS + EXTRA
-REVIEW_VALUES = {"", "ok", "fixed", "delete"}
+REVIEW_VALUES = {"", "ok", "fixed", "delete", "merged"}  # merged: written by merge_staging.py, never by a person
 ORG_STAGING_COLUMNS = ["org_id", "registration_opens", "registration_opens_early", "registration_notes",
                        "financial_aid_available", "financial_aid_notes", "website"]
 ORG_FACTS_FILE = "_organizations.csv"
@@ -131,6 +132,9 @@ def check_rows(rows: list[dict], org_ids: set[str], season: int | None = None) -
         org = (row.get("org_id") or "").strip()
         if pid and org in org_ids and not pid.startswith(f"{org}-"):
             problems.append(f"{label}: program_id must start with '{org}-'")
+        year = (row.get("program_year") or "").strip()
+        if year and year != str(season):
+            problems.append(f"{label}: program_year '{year}' must be {season}")
         if pid:
             if pid in seen:
                 problems.append(f"{label}: duplicate program_id (also staging row {seen[pid]})")
@@ -147,24 +151,61 @@ def check_rows(rows: list[dict], org_ids: set[str], season: int | None = None) -
         review = (row.get("review") or "").strip()
         if review not in REVIEW_VALUES:
             problems.append(f"{label}: review '{review}' must be blank, ok, fixed or delete")
-        if review != "delete" and not (row.get("source_url") or "").strip():
+        if review not in ("delete", "merged") and not (row.get("source_url") or "").strip():
             problems.append(f"{label}: source_url is blank")
     return problems
+
+
+def mark_merged(org_id: str, season: int, root: Path = ROOT) -> None:
+    """After a merge: every row's review becomes `merged`, so the file is not ready again until pull replaces it."""
+    save(org_id, season, [{**r, "review": "merged"} for r in load(org_id, season, root)], root)
 
 
 def load_org_facts(season: int, root: Path = ROOT) -> list[dict]:
     return _read_rows(_season_dir(season, root) / ORG_FACTS_FILE, ORG_STAGING_COLUMNS)
 
 
+def _save_org_facts(season: int, stored: dict, root: Path) -> None:
+    _write_rows(_season_dir(season, root) / ORG_FACTS_FILE, ORG_STAGING_COLUMNS, list(stored.values()))
+
+
 def upsert_org_facts(season: int, rows: list[dict], root: Path = ROOT) -> None:
-    """One row per org_id: non-blank new values overwrite stored ones, blanks never erase."""
+    """One row per org_id: non-blank new values overwrite stored ones, blanks never erase. For add-org."""
     stored = {r["org_id"]: r for r in load_org_facts(season, root)}
     for new in rows:
         base = stored.setdefault(new["org_id"], dict.fromkeys(ORG_STAGING_COLUMNS, ""))
         for col in ORG_STAGING_COLUMNS:
             if (new.get(col) or "").strip():
                 base[col] = new[col]
-    _write_rows(_season_dir(season, root) / ORG_FACTS_FILE, ORG_STAGING_COLUMNS, list(stored.values()))
+    _save_org_facts(season, stored, root)
+
+
+def replace_org_facts(season: int, rows: list[dict], root: Path = ROOT) -> None:
+    """One row per org_id: each new row replaces the stored one, blanks included. For reviewed Orgs-tab rows."""
+    stored = {r["org_id"]: r for r in load_org_facts(season, root)}
+    for new in rows:
+        stored[new["org_id"]] = {c: new.get(c) or "" for c in ORG_STAGING_COLUMNS}
+    _save_org_facts(season, stored, root)
+
+
+def remove_org_facts(season: int, org_ids, root: Path = ROOT) -> None:
+    """Drop these organizations' rows once merged, so later merges never re-apply stale facts."""
+    path = _season_dir(season, root) / ORG_FACTS_FILE
+    if path.exists():
+        _save_org_facts(season, {r["org_id"]: r for r in load_org_facts(season, root) if r["org_id"] not in set(org_ids)}, root)
+
+
+def check_org_facts(row: dict, label: str, season: int) -> list[str]:
+    """Problems with one organization-facts row: real dates in season-1..season, early before opens, http(s) website."""
+    problems = validate_data.check_org_registration(row, label)
+    for col in ("registration_opens", "registration_opens_early"):
+        parsed = _parse_date((row.get(col) or "").strip())
+        if parsed and not season - 1 <= parsed.year <= season:
+            problems.append(f"{label}: {col} {parsed} is not in {season - 1} or {season}")
+    website = (row.get("website") or "").strip()
+    if website and (urlparse(website).scheme not in ("http", "https") or not urlparse(website).hostname):
+        problems.append(f"{label}: website '{website[:60]}' is not an http(s) address")
+    return problems
 
 
 def _scalars(obj: dict, where: str) -> tuple[dict, list[str]]:
@@ -247,7 +288,7 @@ def _cmd_add_org(args, root: Path, season: int) -> int:
     new = {**obj, "org_id": args.org}
     stored = next((r for r in load_org_facts(season, root) if r["org_id"] == args.org), {})
     combined = {**stored, **{k: v for k, v in new.items() if v.strip()}}
-    problems = validate_data.check_org_registration(combined, args.org)
+    problems = check_org_facts(combined, args.org, season)
     if problems:
         return _fail(problems)
     upsert_org_facts(season, [new], root)
@@ -264,7 +305,7 @@ def _cmd_check(args, root: Path, season: int) -> int:
     for row in load_org_facts(season, root):
         if row["org_id"] not in org_ids:
             problems.append(f"{ORG_FACTS_FILE}: unknown org_id {row['org_id']!r}")
-        problems += validate_data.check_org_registration(row, f"{ORG_FACTS_FILE} {row['org_id']}")
+        problems += check_org_facts(row, f"{ORG_FACTS_FILE} {row['org_id']}", season)
     print("\n".join(problems) if problems else "no problems")
     return 1 if problems else 0
 

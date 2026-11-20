@@ -7,6 +7,7 @@ import staging
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "sheet"
 TODAY = "2027-01-10"
+KNOWN = {"o1": {"o1-camp-2027"}, "o2": {"o2-camp-2027"}, "o3": {"o3-camp-2027"}}  # ids a Drafts row_id may name
 
 
 class Parse(unittest.TestCase):
@@ -63,7 +64,7 @@ class Collect(unittest.TestCase):
 
     def run_collect(self, **kw):
         return ss.collect_done(self.tasks, self.drafts, kw.get("orgs", []), kw.get("already", set()),
-                               {"o1", "o2", "o3", "o4"}, 2027, "2027-01-10")
+                               {"o1", "o2", "o3", "o4"}, 2027, "2027-01-10", known_ids=KNOWN, **kw.get("extra", {}))
 
     def test_ready_rejected_and_untouched(self):
         staged, orgs, rejected = self.run_collect()
@@ -97,7 +98,7 @@ class Collect(unittest.TestCase):
 
     def test_taken_extra_ids_are_never_reused(self):
         staged, _, _ = ss.collect_done(self.tasks, self.drafts, [], set(), {"o1", "o2", "o3", "o4"}, 2027,
-                                       "2027-01-10", taken_extra={"o1-added-by-hand-2027"})
+                                       "2027-01-10", taken_extra={"o1-added-by-hand-2027"}, known_ids=KNOWN)
         self.assertEqual([r["program_id"] for r in staged["o1"]], ["o1-camp-2027", "o1-added-by-hand-2027-2"])
 
     def test_already_done_tasks_are_skipped(self):
@@ -137,6 +138,30 @@ class Collect(unittest.TestCase):
         self.assertNotIn("o3", staged)
         self.assertEqual([o["org_id"] for o in orgs], ["o3"])
         self.assertNotIn("t7", [t for t, _ in rejected])
+
+    def test_typed_row_id_must_be_a_current_row_of_the_org(self):
+        # F3: an id from another season, another org, or nowhere rejects the task
+        for rid in ("o1-camp-2026", "o2-camp-2027", "o1-made-up-2027"):
+            self.drafts[0]["row_id"] = rid
+            staged, _, rejected = self.run_collect()
+            self.assertNotIn("o1", staged, rid)
+            self.assertIn("is not one of o1's current rows", dict(rejected)["t1"])
+
+    def test_hand_added_row_gets_the_listing_url_from_sources(self):
+        # F2: a blank source_url on a row with no row_id comes from sources.csv, never from the Tasks row
+        self.drafts[1]["source_url"] = ""
+        self.tasks[0]["source_url"] = "https://evil.example"
+        staged, _, rejected = self.run_collect(extra={"listing_urls": {"o1": "https://o1.org/camps"}})
+        self.assertEqual(staged["o1"][1]["source_url"], "https://o1.org/camps")
+        self.drafts[0]["source_url"] = ""  # a row with a row_id is not filled in
+        _, _, rejected = self.run_collect(extra={"listing_urls": {"o1": "https://o1.org/camps"}})
+        self.assertIn("source_url is blank", dict(rejected)["t1"])
+
+    def test_bad_orgs_row_website_rejects_the_task(self):
+        org = {"task_id": "t1", "org_id": "o1", "website": "javascript:alert(1)"}
+        staged, _, rejected = self.run_collect(orgs=[org])
+        self.assertNotIn("o1", staged)
+        self.assertIn("website", dict(rejected)["t1"])
 
     def test_find_page_tasks_are_ignored_here(self):
         staged, orgs, rejected = self.run_collect()
@@ -197,7 +222,17 @@ class PullCase(unittest.TestCase):
              "notes": "fetch failed 2026-12-01: HTTP 404; keep me"},
             {"org_id": "alpha", "listing_url": "https://alpha.example.org/camps", "kind": "html", "status_2027": "not_posted"},
         ], data / "sources.csv")
+        # The fixture's Drafts rows name these live rows (as a check_changes task would).
+        self.write_programs([("alpha-camp-2027", "alpha"), ("beta-camp-2027", "beta")])
         self.sheet = self.root / "data" / "staging" / "2027" / "sheet"
+
+    def write_programs(self, ids_and_orgs, year="2027"):
+        with open(self.root / "data" / "programs.csv", "w", newline="") as f:
+            w = csv.DictWriter(f, staging.PROGRAM_COLUMNS, lineterminator="\n")
+            w.writeheader()
+            for pid, org in ids_and_orgs:
+                w.writerow({**dict.fromkeys(staging.PROGRAM_COLUMNS, ""), "program_id": pid, "org_id": org,
+                            "program_name": "Camp", "program_year": year, "confidence": "confirmed"})
 
     def pull(self, download=None, today=TODAY):
         out, err = io.StringIO(), io.StringIO()
@@ -234,6 +269,15 @@ class Pull(PullCase):
         gamma = next(r for r in sources.load(self.root / "data" / "sources.csv") if r["org_id"] == "gamma")
         self.assertEqual((gamma["listing_url"], gamma["kind"], gamma["notes"]),
                          ("https://gamma.example.org/summer.pdf", "pdf", "keep me"))
+
+    def test_cleared_orgs_cell_clears_the_staged_fact(self):
+        # F5: the reviewed Orgs row replaces the stored facts, blanks included
+        staging.upsert_org_facts(2027, [{"org_id": "alpha", "registration_opens_early": "2027-02-01",
+                                         "registration_notes": "drafted"}], self.root)
+        self.pull()
+        fact = staging.load_org_facts(2027, self.root)[0]
+        self.assertEqual((fact["registration_opens"], fact["registration_opens_early"], fact["registration_notes"]),
+                         ("2027-03-01", "", "Opens at noon"))
 
     def test_find_page_for_org_without_a_sources_row_adds_one(self):
         sources.save([], self.root / "data" / "sources.csv")
@@ -333,8 +377,7 @@ class PullSafety(PullCase):
         self.assertEqual({p.name: p.read_bytes() for p in self.sheet.iterdir()}, snap)
 
     def test_hand_added_row_never_takes_an_existing_program_id(self):
-        with open(self.root / "data" / "programs.csv", "w", newline="") as f:
-            f.write("program_id,org_id\nalpha-added-by-hand-2027,alpha\n")
+        self.write_programs([("alpha-camp-2027", "alpha"), ("alpha-added-by-hand-2027", "alpha")])
         self.pull()
         self.assertEqual([r["program_id"] for r in staging.load("alpha", 2027, self.root)],
                          ["alpha-camp-2027", "alpha-added-by-hand-2027-2"])
@@ -370,8 +413,8 @@ class PullStops(PullCase):
 
     def test_first_ever_pull_with_empty_tab_writes_nothing(self):
         code, out = self.pull(fake_download(Tasks=""))
-        self.assertEqual((code, self.tree()), (1, {"data/organizations.csv": self.tree()["data/organizations.csv"],
-                                                  "data/sources.csv": self.tree()["data/sources.csv"]}))
+        tree = self.tree()
+        self.assertEqual((code, sorted(tree)), (1, ["data/organizations.csv", "data/programs.csv", "data/sources.csv"]))
         self.assertIn("Tasks tab is empty", out)
         self.assertFalse(self.sheet.exists())
 

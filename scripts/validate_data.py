@@ -10,6 +10,7 @@ Exit code 1 = at least one ERROR (build should be blocked).
 """
 
 import csv
+import datetime
 import re
 import sys
 from pathlib import Path
@@ -74,13 +75,20 @@ def warn(msg: str):
 
 def check_org_registration(row: dict, label: str) -> list[str]:
     """Error strings for bad registration_opens / registration_opens_early values."""
-    errors = []
-    opens = (row.get("registration_opens") or "").strip()
-    early = (row.get("registration_opens_early") or "").strip()
-    for col, value in (("registration_opens", opens), ("registration_opens_early", early)):
-        if value and not DATE_RE.match(value):
+    errors, good = [], {}
+    for col in ("registration_opens", "registration_opens_early"):
+        value = (row.get(col) or "").strip()
+        if not value:
+            continue
+        if not DATE_RE.match(value):
             errors.append(f"{label}: {col} '{value}' is not YYYY-MM-DD")
-    if opens and early and DATE_RE.match(opens) and DATE_RE.match(early) and early > opens:
+            continue
+        try:
+            good[col] = datetime.date.fromisoformat(value)
+        except ValueError:
+            errors.append(f"{label}: {col} '{value}' is not a real date")
+    opens, early = good.get("registration_opens"), good.get("registration_opens_early")
+    if opens and early and early > opens:
         errors.append(f"{label}: registration_opens_early {early} is after registration_opens {opens}")
     return errors
 

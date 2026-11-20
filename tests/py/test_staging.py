@@ -43,11 +43,15 @@ class Checks(unittest.TestCase):
 
     def test_each_problem_is_one_error(self):
         for bad in (dict(start_date="7/5/2027"), dict(start_date="2026-07-05"), dict(end_date="2028-01-01"),
-                    dict(source_url=""), dict(review="maybe"), dict(org_id="nope"), dict(program_name="")):
+                    dict(source_url=""), dict(review="maybe"), dict(org_id="nope"), dict(program_name=""),
+                    dict(program_year="2026"), dict(program_year="1999")):
             self.assertEqual(len(st.check_rows([self.good(**bad)], {"o1"})), 1, bad)
 
     def test_deleted_rows_need_no_source(self):
         self.assertEqual(st.check_rows([self.good(review="delete", source_url="")], {"o1"}), [])
+
+    def test_merged_is_a_review_value_and_needs_no_source(self):
+        self.assertEqual(st.check_rows([self.good(review="merged", source_url="")], {"o1"}), [])
 
     def test_id_must_start_with_the_org_id(self):
         self.assertEqual(len(st.check_rows([self.good(program_id="o2-a-2027")], {"o1", "o2"})), 1)
@@ -55,6 +59,18 @@ class Checks(unittest.TestCase):
 
     def test_duplicate_ids_are_an_error(self):
         self.assertEqual(len(st.check_rows([self.good(), self.good()], {"o1"})), 1)
+
+
+class OrgFactChecks(unittest.TestCase):
+    def test_good_facts(self):
+        self.assertEqual(st.check_org_facts({"registration_opens": "2027-02-04", "registration_opens_early": "2026-12-01",
+                                             "website": "https://o1.org/camps"}, "x", 2027), [])
+
+    def test_each_problem_is_one_error(self):
+        for bad in ({"registration_opens": "2027-02-30"}, {"registration_opens": "2025-02-04"},
+                    {"registration_opens_early": "2028-01-04"}, {"website": "javascript:alert(1)"},
+                    {"website": "ftp://o1.org"}, {"website": "o1.org"}):
+            self.assertEqual(len(st.check_org_facts(bad, "x", 2027)), 1, bad)
 
 
 def make_root(tmp: Path) -> Path:
@@ -169,8 +185,20 @@ class OrgFacts(unittest.TestCase):
         self.assertEqual((rows[0]["org_id"], rows[0]["registration_opens"], rows[0]["registration_notes"], rows[0]["website"]),
                          ("o1", "2027-02-04", "lottery", "https://new"))
 
+    def test_replace_lets_a_blank_clear_a_fact(self):
+        st.upsert_org_facts(2027, [{"org_id": "o1", "registration_opens": "2027-02-03", "website": "https://o1.org"}], self.root)
+        st.replace_org_facts(2027, [{"org_id": "o1", "registration_opens": "", "website": "https://o1.org"}], self.root)
+        rows = st.load_org_facts(2027, root=self.root)
+        self.assertEqual([(r["org_id"], r["registration_opens"], r["website"]) for r in rows], [("o1", "", "https://o1.org")])
+
+    def test_remove_drops_only_the_named_rows(self):
+        st.upsert_org_facts(2027, [{"org_id": "o1", "registration_notes": "a"}, {"org_id": "o2", "registration_notes": "b"}], self.root)
+        st.remove_org_facts(2027, ["o1"], self.root)
+        self.assertEqual([r["org_id"] for r in st.load_org_facts(2027, root=self.root)], ["o2"])
+
     def test_problems_exit_1_and_write_nothing(self):
         for obj, org in (({"bogus": "x"}, "o1"), ({"registration_opens": "Feb 4"}, "o1"),
+                         ({"registration_opens": "2027-02-30"}, "o1"), ({"website": "javascript:alert(1)"}, "o1"),
                          ({"registration_opens": "2027-02-04", "registration_opens_early": "2027-03-01"}, "o1"),
                          ({"website": "https://x"}, "nope")):
             self.assertEqual(self.add_org(obj, org)[0], 1, obj)

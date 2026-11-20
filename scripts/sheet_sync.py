@@ -26,7 +26,6 @@ from urllib.parse import quote
 import ingest_config
 import sources
 import staging
-import validate_data
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -182,8 +181,15 @@ def find_page_urls(tasks, orgs, already_done) -> tuple[dict[str, str], list[tupl
     return urls, rejected
 
 
-def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, taken_extra=()):
-    """Turn newly done tasks into (staged rows by org, organization facts, rejected (task_id, reason))."""
+def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, taken_extra=(), known_ids=None,
+                 listing_urls=None):
+    """Turn newly done tasks into (staged rows by org, organization facts, rejected (task_id, reason)).
+
+    known_ids: org_id -> the program ids a Drafts row_id may name (the org's staging file and its live rows of
+    this season). Any other typed row_id rejects the task. listing_urls: org_id -> listing_url from
+    sources.csv, the source_url of a hand-added row (blank row_id) left blank.
+    """
+    known_ids, listing_urls = known_ids or {}, listing_urls or {}
     taken = {d["row_id"] for d in drafts if d.get("row_id")} | set(taken_extra)
     staged: dict[str, list[dict]] = {}
     facts, rejected = [], []
@@ -202,6 +208,13 @@ def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, take
         blank = [i for i, r in enumerate(rows, 1) if not r.get("review")]
         if blank:
             problems.append(f"review is blank on row(s) {', '.join(map(str, blank))}: write ok, fixed or delete")
+        problems += [f"row {i}: row_id '{r['row_id'][:60]}' is not one of {org}'s current rows: "
+                     "leave row_id blank for a camp you add" for i, r in enumerate(rows, 1)
+                     if r.get("row_id") and r["row_id"] not in known_ids.get(org, set())]
+        problems += [f"row {i}: review 'merged' is set by the maintainer's merge: write ok, fixed or delete"
+                     for i, r in enumerate(rows, 1) if r.get("review") == "merged"]
+        rows = [{**r, "source_url": r.get("source_url") or ("" if r.get("row_id") else listing_urls.get(org, ""))}
+                for r in rows]
         new_rows = staging.prepare([{**r, "program_id": r.get("row_id", "")} for r in rows], org, season, taken, today)
         problems += staging.check_rows(new_rows, org_ids, season) if not problems else []
         existing = {r["program_id"] for r in staged.get(org, [])}
@@ -213,7 +226,7 @@ def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, take
             fact["org_id"] = fact["org_id"] or org
             if fact["org_id"] != org:
                 problems.append(f"Orgs row org_id '{fact['org_id']}' is not '{org}'")
-            problems += validate_data.check_org_registration(fact, f"Orgs row for {tid}")
+            problems += staging.check_org_facts(fact, f"Orgs row for {tid}", season)
         if problems:
             rejected.append((tid, "; ".join(problems)))
             continue
@@ -293,12 +306,18 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
 
     with open(root / "data" / "organizations.csv", newline="", encoding="utf-8") as f:
         org_ids = {r["org_id"] for r in csv.DictReader(f)}
-    programs = root / "data" / "programs.csv"
-    existing_ids = set()
-    if programs.exists():
-        with open(programs, newline="", encoding="utf-8") as f:
-            existing_ids = {r["program_id"] for r in csv.DictReader(f)}
-    staged, facts, rejected = collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, existing_ids)
+    programs = _read_csv_rows(root / "data" / "programs.csv")
+    existing_ids = {r["program_id"] for r in programs}
+    known_ids: dict[str, set] = {}
+    for r in programs:
+        if r.get("program_year") == str(season) and r.get("confidence") != "inactive":
+            known_ids.setdefault(r["org_id"], set()).add(r["program_id"])
+    for org in staging.staged_org_ids(season, root):
+        known_ids.setdefault(org, set()).update(r["program_id"] for r in staging.load(org, season, root))
+    source_rows = sources.load(root / "data" / "sources.csv")
+    listing_urls = {r["org_id"]: r["listing_url"] for r in source_rows if r["listing_url"]}
+    staged, facts, rejected = collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, existing_ids,
+                                           known_ids=known_ids, listing_urls=listing_urls)
     rejected += skipped_done
     urls, find_rejected = find_page_urls(tasks, orgs, already_done)
     rejected += find_rejected
@@ -318,7 +337,7 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
         staging.save(org, season, rows, root)
         print(f"staged {len(rows)} row(s) for {org}")
     if facts:
-        staging.upsert_org_facts(season, facts, root)
+        staging.replace_org_facts(season, facts, root)  # a reviewed Orgs row: a cleared cell clears the fact
     if urls:
         _apply_urls(urls, root / "data" / "sources.csv")
         for org, url in urls.items():

@@ -12,6 +12,9 @@ class OrgRegistrationChecks(unittest.TestCase):
     def test_bad_date_format(self):
         self.assertEqual(len(v.check_org_registration({"registration_opens": "2/4/2027"}, "x")), 1)
 
+    def test_impossible_date(self):
+        self.assertEqual(len(v.check_org_registration({"registration_opens": "2027-02-30"}, "x")), 1)
+
     def test_early_after_opens(self):
         self.assertEqual(len(v.check_org_registration({"registration_opens": "2027-02-04", "registration_opens_early": "2027-02-11"}, "x")), 1)
 
