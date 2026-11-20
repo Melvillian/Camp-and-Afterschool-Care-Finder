@@ -1,6 +1,6 @@
 # Ingesting 2027 Camp Listings — Design
 
-*2026-11-20. Status: approach chosen by Melvillian; document awaiting his approval. See "Decisions" for who decided what.*
+*2026-11-20. Status: approved by Melvillian. See "Decisions" for who decided what. Plan: `docs/superpowers/plans/2026-11-20-2027-camp-ingestion.md`.*
 
 ## Intent
 
@@ -63,7 +63,7 @@ Each source site was probed once today. Grouped by what sits behind the registra
 
 ## Non-goals
 
-- Changing how the site displays programs. (A "registration opens soon" view is a likely follow-up.)
+- Changing how the site displays programs, beyond the "Registration opening soon" list described below.
 - Adding organizations in under-covered counties (upstream issue #2). The same pipeline will serve that later.
 - Moving off CSV files (upstream issue #10).
 - Fully automatic publishing.
@@ -78,7 +78,7 @@ Each source site was probed once today. Grouped by what sits behind the registra
 ## Constraints
 
 - Data stays in `data/programs.csv` and `data/organizations.csv`, validated by `scripts/validate_data.py` and built by `scripts/build_data_js.py`.
-- No new columns in those two files; the three blank registration columns are enough.
+- `programs.csv` gets no new columns; its three blank registration columns are enough. `organizations.csv` gets two (see "Registration dates").
 - `program_id` values are never reused or renamed.
 - Scripts use the Python standard library; requests identify themselves and pause between calls, as the existing scripts do.
 - Volunteers with no coding background must be able to contribute, in sittings as short as ten minutes, using only a Google account.
@@ -125,7 +125,19 @@ For each `posted` source, an extraction step writes proposed rows to `data/stagi
 - `gated` and `manual`: no draft is produced; a volunteer enters the rows in the Sheet from scratch.
 - Sites whose `robots.txt` names AI crawlers (`robots_ai_optout`) are treated as `manual`: Claude does not read them.
 
-Organization-level facts found on the way (registration open dates, resident and non-resident dates, lottery windows, financial aid) are proposed in `data/staging/2027/_organizations.csv`.
+Organization-level facts found on the way (registration dates, financial aid) are proposed in `data/staging/2027/_organizations.csv`.
+
+### 3a. Registration dates
+
+Most organizations announce when registration opens before they list any sessions, so these dates live on the organization, not on its programs. `organizations.csv` already has `registration_opens`; it gains two columns after it:
+
+| Column | Meaning |
+|---|---|
+| `registration_opens` | The date general registration opens, `YYYY-MM-DD`. |
+| `registration_opens_early` | The first date anyone can register or apply: residents, members, or the start of a lottery window. Blank when there is no early date. |
+| `registration_notes` | One line of plain text for what the dates do not say, e.g. `Residents Feb 4; non-residents Feb 11` or `Lottery applications Jan 8–12`. |
+
+The Camps page gets a "Registration opening soon" list above the results. It shows each organization whose `registration_opens_early` or `registration_opens` falls between 30 days ago and any future date, soonest first, with the organization's name linked to its website, the date or dates, and the note. A date already passed is labelled "Open now". The list shows eight entries with a "Show all" control, and is absent when empty. Program-level registration dates keep working as they do today.
 
 ### 4. Volunteer review in the Google Sheet
 
@@ -156,7 +168,7 @@ A volunteer claims a task by typing their name and setting `status` to `claimed`
 
 `pull`:
 1. Downloads each tab as CSV. The Sheet is readable without credentials through its CSV export URL (verified today).
-2. Saves the tabs under `data/staging/2027/sheet/` and commits them, so every sync is a dated snapshot and a vandalised Sheet can be restored from the last good one.
+2. Saves the tabs under `data/staging/2027/sheet/`, for the maintainer to commit, so every sync is a dated snapshot and a vandalised Sheet can be restored from the last good one.
 3. Compares with the previous snapshot and prints what changed: tasks claimed, tasks done, rows edited.
 4. For every task newly marked `done`, runs the project validator's rules on its rows. Valid tasks are written to `data/staging/2027/<org_id>.csv`, ready to merge. Invalid ones are listed with the reason, and flipped to `needs_help` on the next push.
 
@@ -183,9 +195,9 @@ The page reads the **Tasks** tab live from the Sheet in the visitor's browser (G
 
 The Sheet is currently editable by anyone with the link. Melvillian accepted this for the build period and asked for a loud reminder.
 
-`data/sheet_config.json` records `{"sheet_id": "...", "public_edit": true, "secure_by": "2026-12-20"}`. A test in the Python suite fails on or after `secure_by` while `public_edit` is still `true`, with the message:
+`data/ingest_config.json` records `{"season": 2027, "sheet_id": "...", "tasks_gid": "...", "public_edit": true, "secure_by": "2026-12-20"}`. A test in the Python suite fails on or after `secure_by` while `public_edit` is still `true`, with the message:
 
-> REMINDER: the volunteer Google Sheet is still editable by anyone with the link. Restrict editing, set up the service-account key, then set "public_edit" to false in data/sheet_config.json.
+> REMINDER: the volunteer Google Sheet is still editable by anyone with the link. Restrict editing, set up the service-account key, then set "public_edit" to false in data/ingest_config.json.
 
 It passes before that date, and passes permanently once `public_edit` is `false`.
 
@@ -240,10 +252,12 @@ Made by Melvillian on 2026-11-20:
    - sites that name AI crawlers in `robots.txt` are entered by hand;
    - Claude drafts the export request to the three recreation departments; who sends it is still open (see below).
 
-Raised by an independent review of this document and still open (asked of Melvillian 2026-11-20):
+Made by Melvillian on 2026-11-20, after an independent review of this document:
 
-- **Where an organization's registration date appears before its sessions are posted.** Recommended: store the dates per organization, add two columns to `organizations.csv`, and add a "Registration opening soon" list to the Camps page. This would reverse two statements above (no new columns; no display changes).
-- **What happens to an organization's 2026 rows once any 2027 rows exist.** Recommended: decide per organization, not per page. An organization's 2026 rows stay visible, marked as last season, until that organization has 2027 rows.
+6. **Registration dates** are stored per organization and shown in a "Registration opening soon" list on the Camps page.
+7. **This document is approved.**
+
+Settled in the bug-fix work (merged 2026-11-20): an organization's 2026 rows stay visible, marked with their year, until that organization has 2027 rows.
 
 Claude's calls, not yet confirmed:
 
@@ -252,7 +266,8 @@ Claude's calls, not yet confirmed:
 
 - The task board is a page on the camp finder site that reads the Sheet live.
 - The tab and column layout of the Sheet.
-- Snapshots of the Sheet are committed to git on every pull.
+- Snapshots of the Sheet are saved on every pull for the maintainer to commit.
+- The meaning of the three registration fields, and the 30-day and eight-entry limits of the list.
 - Claims expire after three days.
 - Until the service-account key exists, new tasks reach the Sheet by a maintainer pasting a generated file.
 
