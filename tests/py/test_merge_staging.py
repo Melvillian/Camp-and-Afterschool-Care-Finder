@@ -124,15 +124,38 @@ class Cli(unittest.TestCase):
         self.assertIn("o1", out)
 
     def test_id_belonging_to_another_org_is_refused(self):
-        # an existing o1 row owns the id; o2 must not overwrite it
+        # programs.csv already holds o1-camp-a-2027 under o1; o2 stages the same id
         self.stage()
         self.merge("--org", "o1")
         self.stage(org="o2", program_id="o1-camp-a-2027")
         before = self.read("programs.csv")
         code, out = self.merge("--org", "o2")
         self.assertEqual(code, 1)
+        self.assertEqual(self.read("programs.csv"), before)
+
+    def test_existing_row_owned_by_another_org_is_refused(self):
+        import csv
+        row = {c: "" for c in st.PROGRAM_COLUMNS} | {"program_id": "o2-camp-a-2027", "org_id": "o1", "program_name": "x"}
+        with open(self.root / "data" / "programs.csv", "a", newline="") as f:
+            csv.writer(f, lineterminator="\r\n").writerow([row[c] for c in st.PROGRAM_COLUMNS])
+        self.stage(org="o2")
+        before = self.read("programs.csv")
+        code, out = self.merge("--org", "o2")
+        self.assertEqual(code, 1)
         self.assertIn("already belongs", out)
         self.assertEqual(self.read("programs.csv"), before)
+
+    def test_same_id_in_two_staging_files_refuses_the_run(self):
+        # o1-x's id also starts with "o1-", so a prefix check alone passes both files
+        self.stage(org="o1", program_id="o1-x-camp-2027")
+        self.stage(org="o1-x", program_id="o1-x-camp-2027")
+        before = (self.read("programs.csv"), self.read("sources.csv"))
+        for argv in (("--org", "o1", "--org", "o1-x"), ("--all-ready",)):
+            code, out = self.merge(*argv)
+            self.assertEqual(code, 1, argv)
+            self.assertIn("o1-x-camp-2027", out)
+            self.assertEqual((self.read("programs.csv"), self.read("sources.csv")), before)
+        self.assertEqual(self.status("o1"), "extracted")
 
     def test_renamed_row_keeps_id_through_merge(self):
         self.stage()

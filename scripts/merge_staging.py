@@ -149,6 +149,18 @@ def main(argv, root: Path = ROOT, validate=None, build=None, today: str | None =
         print("nothing ready to merge")
         return 0
 
+    claimed: dict[str, str] = {}
+    clashes = []
+    for org in chosen:
+        for r in st.load(org, season, root):
+            other = claimed.setdefault(r["program_id"], org)
+            if other != org:
+                clashes.append(f"program_id {r['program_id']} is staged by both {other} and {org}")
+    if clashes:
+        print("\n".join(clashes), file=sys.stderr)
+        print("refused; nothing written", file=sys.stderr)
+        return 1
+
     staged_orgs = {r["org_id"]: r for r in st.load_org_facts(season, root)}
     totals = {"added": 0, "updated": 0, "retired": 0}
     new_programs, new_orgs = programs, orgs
@@ -180,7 +192,7 @@ def main(argv, root: Path = ROOT, validate=None, build=None, today: str | None =
     if not ok:
         (data / "programs.csv").write_bytes(prog_raw)
         (data / "organizations.csv").write_bytes(org_raw)
-        blamed = [org for org in chosen if org in output or any(pid in output for pid in ids_by_org[org])]
+        blamed = [org for org in chosen if f"org_id '{org}'" in output or any(f"({pid[:40]}" in output for pid in ids_by_org[org])]
         print(f"{stage} failed; programs.csv and organizations.csv restored, sources.csv untouched", file=sys.stderr)
         print(f"organizations whose rows may have caused it: {', '.join(blamed) if blamed else 'unknown'}", file=sys.stderr)
         print(output, file=sys.stderr)

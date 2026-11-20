@@ -49,6 +49,10 @@ class Checks(unittest.TestCase):
     def test_deleted_rows_need_no_source(self):
         self.assertEqual(st.check_rows([self.good(review="delete", source_url="")], {"o1"}), [])
 
+    def test_id_must_start_with_the_org_id(self):
+        self.assertEqual(len(st.check_rows([self.good(program_id="o2-a-2027")], {"o1", "o2"})), 1)
+        self.assertEqual(len(st.check_rows([self.good(program_id="o1x-a-2027")], {"o1", "o1x"})), 1)
+
     def test_duplicate_ids_are_an_error(self):
         self.assertEqual(len(st.check_rows([self.good(), self.good()], {"o1"})), 1)
 
@@ -59,7 +63,7 @@ def make_root(tmp: Path) -> Path:
     (tmp / "data" / "programs.csv").write_bytes((prog_header + "\r\n").encode())
     (tmp / "data" / "organizations.csv").write_bytes(
         b"org_id,org_name,website,registration_opens,registration_opens_early,registration_notes,"
-        b"financial_aid_available,financial_aid_notes,verified_date\r\no1,One,https://old,,,,,,\r\no2,Two,,,,,,,\r\n")
+        b"financial_aid_available,financial_aid_notes,verified_date\r\no1,One,https://old,,,,,,\r\no2,Two,,,,,,,\r\no1-x,OneX,,,,,,,\r\n")
     return tmp
 
 
@@ -114,6 +118,33 @@ class AddCli(unittest.TestCase):
         code, _ = self.add([self.good(program_id="o1-camp-a-2027")])
         self.assertEqual(code, 1)
         self.assertEqual(len(st.load("o1", 2027, root=self.root)), 1)
+
+
+class TypedJson(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = make_root(Path(self._tmp.name))
+        self.json = self.root / "rows.json"
+        self.addCleanup(self._tmp.cleanup)
+
+    def go(self, cmd, obj):
+        self.json.write_text(json.dumps(obj))
+        return run(st.main, [cmd, "--org", "o1", "--json", str(self.json)], self.root, today="2026-12-15")
+
+    def test_numbers_are_kept_including_zero(self):
+        row = {"program_name": "Free", "cost_per_week": 0, "start_date": "2027-07-05", "source_url": "https://x"}
+        self.assertEqual(self.go("add", [row, {**row, "program_name": "Paid", "cost_per_week": 250}])[0], 0)
+        self.assertEqual([r["cost_per_week"] for r in st.load("o1", 2027, root=self.root)], ["0", "250"])
+
+    def test_booleans_and_nested_values(self):
+        self.assertEqual(self.go("add-org", {"financial_aid_available": True})[0], 0)
+        self.assertEqual(st.load_org_facts(2027, root=self.root)[0]["financial_aid_available"], "TRUE")
+        code, out = self.go("add-org", {"registration_notes": ["a"]})
+        self.assertEqual(code, 1)
+        self.assertNotIn("Traceback", out)
+        code, out = self.go("add", [{"program_name": "X", "notes": {"a": 1}}])
+        self.assertEqual(code, 1)
+        self.assertNotIn("Traceback", out)
 
 
 class OrgFacts(unittest.TestCase):

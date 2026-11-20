@@ -128,6 +128,9 @@ def check_rows(rows: list[dict], org_ids: set[str], season: int | None = None) -
         pid = (row.get("program_id") or "").strip()
         label = f"staging row {i} ({pid[:40] or 'NO_ID'})"
         problems += validate_data.check_program_row(row, org_ids, label)[0]
+        org = (row.get("org_id") or "").strip()
+        if pid and org in org_ids and not pid.startswith(f"{org}-"):
+            problems.append(f"{label}: program_id must start with '{org}-'")
         if pid:
             if pid in seen:
                 problems.append(f"{label}: duplicate program_id (also staging row {seen[pid]})")
@@ -138,7 +141,7 @@ def check_rows(rows: list[dict], org_ids: set[str], season: int | None = None) -
                 continue
             parsed = _parse_date(value)
             if parsed is None:
-                problems.append(f"{label}: {col} '{value}' is not YYYY-MM-DD")
+                problems.append(f"{label}: {col} '{value}' is not a real YYYY-MM-DD date")
             elif parsed.year != season:
                 problems.append(f"{label}: {col} {value} is outside the {season} season")
         review = (row.get("review") or "").strip()
@@ -164,6 +167,21 @@ def upsert_org_facts(season: int, rows: list[dict], root: Path = ROOT) -> None:
     _write_rows(_season_dir(season, root) / ORG_FACTS_FILE, ORG_STAGING_COLUMNS, list(stored.values()))
 
 
+def _scalars(obj: dict, where: str) -> tuple[dict, list[str]]:
+    """JSON values as CSV text: null -> '', true/false -> TRUE/FALSE, numbers via str(). Lists and objects are errors."""
+    out, problems = {}, []
+    for key, value in obj.items():
+        if value is None:
+            out[key] = ""
+        elif isinstance(value, bool):
+            out[key] = "TRUE" if value else "FALSE"
+        elif isinstance(value, (str, int, float)):
+            out[key] = str(value)
+        else:
+            problems.append(f"{where}: {key!r} must be text, a number or true/false")
+    return out, problems
+
+
 def _csv_rows(path: Path) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
@@ -185,6 +203,10 @@ def _cmd_add(args, root: Path, season: int, today: str) -> int:
         return _fail([f"cannot read {args.json}: {exc}"])
     if not isinstance(new, list) or not all(isinstance(r, dict) for r in new):
         return _fail(["the JSON file must be a list of row objects"])
+    converted = [_scalars(r, f"row {i}") for i, r in enumerate(new, 1)]
+    if any(p for _, p in converted):
+        return _fail([m for _, p in converted for m in p])
+    new = [r for r, _ in converted]
     problems = [f"row {i}: unknown column {k!r}" for i, r in enumerate(new, 1) for k in r if k not in STAGING_COLUMNS]
     problems += [f"row {i}: org_id {r['org_id']!r} is not {args.org!r}" for i, r in enumerate(new, 1)
                  if r.get("org_id") and r["org_id"] != args.org]
@@ -214,6 +236,9 @@ def _cmd_add_org(args, root: Path, season: int) -> int:
         return _fail([f"cannot read {args.json}: {exc}"])
     if not isinstance(obj, dict):
         return _fail(["the JSON file must be one object"])
+    obj, problems = _scalars(obj, "facts")
+    if problems:
+        return _fail(problems)
     problems = [f"unknown key {k!r}" for k in obj if k not in ORG_STAGING_COLUMNS]
     if obj.get("org_id") not in (None, "", args.org):
         problems.append(f"org_id {obj['org_id']!r} is not {args.org!r}")
@@ -221,7 +246,7 @@ def _cmd_add_org(args, root: Path, season: int) -> int:
         return _fail(problems)
     new = {**obj, "org_id": args.org}
     stored = next((r for r in load_org_facts(season, root) if r["org_id"] == args.org), {})
-    combined = {**stored, **{k: v for k, v in new.items() if (v or "").strip()}}
+    combined = {**stored, **{k: v for k, v in new.items() if v.strip()}}
     problems = validate_data.check_org_registration(combined, args.org)
     if problems:
         return _fail(problems)
