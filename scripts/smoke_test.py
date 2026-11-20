@@ -22,6 +22,7 @@ MAC_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 TASKS_FIXTURE = (
     "task_id,org_id,org_name,kind,minutes,due,source_url,status,claimed_by,claimed_on,volunteer_notes\n"
     "t1,a,Alpha Camp,find_page,2,,,open,,,\n"
+    ",,,,,,,,,,\n"
     "t2,b,<i>Evil</i> Org,check_draft,10,2027-02-04,https://example.org/b,open,,,\n"
     "t3,c,Gamma Camp,enter_new,45,,,open,,,\n"
     "t4,d,Delta Camp,check_draft,10,,,claimed,Zed Volunteer,2027-01-12,\n"
@@ -149,7 +150,7 @@ def main():
             check("board: progress", "0 of 4 tasks done · 1 in progress" in dom)
             check("board: snapshot note", "Showing the last saved copy. Saved Jan 12." in dom)
             check("board: sheet link", "edit#gid=0&amp;range=A2" in dom or "edit#gid=0&range=A2" in dom)
-            check("board: second task row", "range=A3" in dom.replace("&amp;", "&"))
+            check("board: link keeps its row after a blank row", "range=A4" in dom.replace("&amp;", "&") and "range=A3" not in dom.replace("&amp;", "&"))
             check("board: names not shown", "Zed Volunteer" not in dom)
             check("board: claimed task not listed", "Delta Camp" not in dom)
             check("board: escaped", "&lt;i&gt;Evil&lt;/i&gt; Org" in dom)

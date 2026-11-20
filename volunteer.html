@@ -20,8 +20,8 @@
 
   <div class="static-page">
 
-    <section class="static-section" id="board" aria-live="polite">
-      <p id="boardMessage">Loading tasks…</p>
+    <section class="static-section" id="board">
+      <p id="boardMessage" aria-live="polite">Loading tasks…</p>
       <p id="boardProgress" class="board-progress"></p>
       <p id="boardPrograms"></p>
       <p id="boardSource" class="board-source"></p>
@@ -33,6 +33,7 @@
       <ol>
         <li><strong>Pick a task</strong> above and press <em>Open in the Sheet</em>. It opens our shared Google Sheet at that task's row. Type your first name in <code>claimed_by</code>, today's date in <code>claimed_on</code>, and change <code>status</code> to <code>claimed</code>.</li>
         <li><strong>Do it.</strong> The <code>kind</code> column says what to do. Usually that means opening the camp's page and comparing it with the draft rows in the Drafts tab.</li>
+        <li><strong>Check the Orgs tab.</strong> If your task has a row there (find it by <code>task_id</code>), check when registration opens, whether financial aid is offered, and the website. Fix what is wrong and fill in what is blank. Leave a cell blank if the page does not say.</li>
         <li><strong>Mark each row</strong> <code>ok</code> (it matches the page), <code>fixed</code> (you changed something to match) or <code>delete</code> (the page does not have this camp).</li>
         <li><strong>Finish</strong> by changing <code>status</code> to <code>done</code>.</li>
       </ol>

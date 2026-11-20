@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, groupTasks } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, parseCsvRows, groupTasks } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -155,10 +155,20 @@ test('groupTasks buckets open tasks by time and sorts by due date', () => {
 test('groupTasks: boundaries, bad minutes, unknown status, ties by org name', () => {
   const t = (task_id, minutes, status, due = '', org_name = task_id) => ({ task_id, minutes, status, due, org_name });
   const g = groupTasks([t('m5', '5', 'open'), t('m6', '6', 'open'), t('m15', '15', 'open'), t('m16', '16', 'open'),
-    t('bad', 'soon', 'open'), t('empty', '', 'open'), t('odd', '2', 'Open'), t('zed', '10', 'open', '2027-01-01', 'Zed'),
+    t('bad', 'soon', 'open'), t('empty', '', 'open'), t('odd', '2', 'reopened'), t('zed', '10', 'open', '2027-01-01', 'Zed'),
     t('amy', '10', 'open', '2027-01-01', 'Amy'), t('junk', '10', 'open', 'next week', 'Junk')]);
   assert.deepEqual(g.quick.map(x => x.task_id), ['m5']);
   assert.deepEqual(g.medium.map(x => x.task_id), ['amy', 'zed', 'junk', 'm15', 'm6']);
   assert.deepEqual(g.long.map(x => x.task_id), ['bad', 'empty', 'm16']);
   assert.deepEqual(g.counts, { open: 9, claimed: 0, done: 0, needs_help: 0, total: 10 });
+});
+test('parseCsvRows keeps each row\'s position when blank rows are dropped', () => {
+  const rows = parseCsvRows('a,b\n1,x\n,\n\n2,"multi\nline"\n3,z');
+  assert.deepEqual(rows.map(r => [r.row, r.values.a]), [[2, '1'], [5, '2'], [6, '3']]);
+  assert.deepEqual(parseCsvRows(''), []);
+});
+test('groupTasks ignores case and stray spaces in status', () => {
+  const g = groupTasks([{ task_id: 'a', minutes: '2', status: ' Open ' }, { task_id: 'b', minutes: '2', status: 'Done ' }]);
+  assert.deepEqual(g.quick.map(x => x.task_id), ['a']);
+  assert.deepEqual(g.counts, { open: 1, claimed: 0, done: 1, needs_help: 0, total: 2 });
 });

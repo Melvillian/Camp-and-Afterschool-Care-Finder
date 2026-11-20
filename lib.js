@@ -147,10 +147,11 @@
     return out.sort((a, b) => a.sortDate < b.sortDate ? -1 : a.sortDate > b.sortDate ? 1 : String(a.name).localeCompare(String(b.name)));
   }
 
-  // RFC 4180 CSV -> array of objects keyed by the header row. Fully blank rows are dropped.
-  function parseCsv(text) {
-    const rows = [];
-    let row = [], field = '', inQuotes = false;
+  // RFC 4180 CSV -> [{ row, values }] for each non-blank data row, `values` keyed by the header row.
+  // `row` is the record's position in the text, counting blank rows (the header is row 1), which is its Sheet row.
+  function parseCsvRows(text) {
+    const records = [];
+    let record = [], field = '', inQuotes = false;
     const src = String(text || '').replace(/^\ufeff/, '');
     for (let i = 0; i < src.length; i++) {
       const c = src[i];
@@ -159,21 +160,29 @@
           if (src[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
         } else field += c;
       } else if (c === '"') inQuotes = true;
-      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === ',') { record.push(field); field = ''; }
       else if (c === '\n' || c === '\r') {
         if (c === '\r' && src[i + 1] === '\n') i++;
-        row.push(field); rows.push(row); row = []; field = '';
+        record.push(field); records.push(record); record = []; field = '';
       } else field += c;
     }
-    if (field !== '' || row.length) { row.push(field); rows.push(row); }
-    const kept = rows.filter(r => r.some(v => v.trim() !== ''));
-    if (!kept.length) return [];
-    const header = kept[0].map(h => h.trim());
-    return kept.slice(1).map(r => {
-      const o = {};
-      header.forEach((h, i) => { o[h] = r[i] === undefined ? '' : r[i]; });
-      return o;
+    if (field !== '' || record.length) { record.push(field); records.push(record); }
+    const headerAt = records.findIndex(r => r.some(v => v.trim() !== ''));
+    if (headerAt < 0) return [];
+    const header = records[headerAt].map(h => h.trim());
+    const out = [];
+    records.forEach((r, i) => {
+      if (i <= headerAt || !r.some(v => v.trim() !== '')) return;
+      const values = {};
+      header.forEach((h, j) => { values[h] = r[j] === undefined ? '' : r[j]; });
+      out.push({ row: i + 1, values });
     });
+    return out;
+  }
+
+  // Same, as plain objects. Fully blank rows are dropped.
+  function parseCsv(text) {
+    return parseCsvRows(text).map(r => r.values);
   }
 
   // Open tasks by time (<=5, 6-15, longer or unreadable), each by due date (blank or invalid last), then org name.
@@ -182,9 +191,10 @@
     const counts = { open: 0, claimed: 0, done: 0, needs_help: 0, total: tasks.length };
     const quick = [], medium = [], long = [];
     tasks.forEach(t => {
-      if (!Object.prototype.hasOwnProperty.call(counts, t.status) || t.status === 'total') return;
-      counts[t.status]++;
-      if (t.status !== 'open') return;
+      const status = String(t.status === undefined ? '' : t.status).trim().toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(counts, status) || status === 'total') return;
+      counts[status]++;
+      if (status !== 'open') return;
       const raw = String(t.minutes === undefined ? '' : t.minutes).trim();
       const m = /^\d+(\.\d+)?$/.test(raw) ? Number(raw) : NaN;
       (m <= 5 ? quick : m <= 15 ? medium : long).push(t);
@@ -198,5 +208,5 @@
     return { quick: quick.sort(cmp), medium: medium.sort(cmp), long: long.sort(cmp), counts };
   }
 
-  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, groupTasks, validIso };
+  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus, seasonYear, registrationList, parseCsv, parseCsvRows, groupTasks, validIso };
 });

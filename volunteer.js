@@ -6,6 +6,8 @@
   const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const GROUPS = [['quick', '2 minutes'], ['medium', '10 minutes'], ['long', '30–60 minutes']];
 
+  const LIVE_TIMEOUT_MS = 8000;
+
   const el = id => document.getElementById(id);
 
   function shortDate(iso) {
@@ -13,10 +15,16 @@
     return MONTH_ABBR[m - 1] + ' ' + d;
   }
 
-  async function fetchText(url) {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.text();
+  async function fetchText(url, timeoutMs) {
+    const controller = new AbortController();
+    const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.text();
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   // The Tasks tab as parsed rows, or null when the text is not that tab (a sign-in page, an error page...).
@@ -24,14 +32,14 @@
     const firstLine = String(text).replace(/^﻿/, '').split(/\r?\n/, 1)[0];
     const header = firstLine.split(',').map(h => h.replace(/^\s*"?|"?\s*$/g, ''));
     if (!header.includes('task_id')) return null;
-    // Row numbers follow the tab as downloaded: the first data row is row 2.
-    return L.parseCsv(text).map((t, i) => Object.assign(t, { row: i + 2 }));
+    // Row numbers follow the tab as downloaded (first data row is row 2), blank rows included.
+    return L.parseCsvRows(text).map(r => Object.assign(r.values, { row: r.row }));
   }
 
   async function loadLive(config) {
     try {
       const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(config.sheet_id) + '/gviz/tq?tqx=out:csv&sheet=Tasks';
-      return parseTasks(await fetchText(url));
+      return parseTasks(await fetchText(url, LIVE_TIMEOUT_MS));
     } catch (e) {
       return null;
     }
