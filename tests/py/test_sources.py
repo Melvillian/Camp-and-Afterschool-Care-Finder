@@ -27,6 +27,18 @@ class Seeding(unittest.TestCase):
         self.assertFalse(s.names_ai_crawler("# User-agent: GPTBot\nUser-agent: *"))
         self.assertFalse(s.names_ai_crawler("User-agent: *\nCrawl-delay: 10\n"))
         self.assertFalse(s.names_ai_crawler(""))
+        for name in ("Claude-Web", "Claude-User", "ChatGPT-User", "OAI-SearchBot", "Bytespider", "Amazonbot",
+                     "Applebot-Extended", "meta-externalagent"):
+            self.assertTrue(s.names_ai_crawler(f"User-agent: {name}\nDisallow: /\n"), name)
+
+    def test_blanket_disallow_counts_as_opted_out(self):
+        self.assertTrue(s.opts_out("User-agent: *\nDisallow: /\n"))
+        self.assertTrue(s.opts_out("User-agent: Googlebot\nUser-agent: *\nDisallow: / # all\n"))
+        self.assertTrue(s.opts_out("User-agent: GPTBot\nAllow: /\n"))
+        self.assertFalse(s.opts_out("User-agent: *\nDisallow:\n"))
+        self.assertFalse(s.opts_out("User-agent: *\nDisallow: /private\n"))
+        self.assertFalse(s.opts_out("User-agent: Googlebot\nDisallow: /\n\nUser-agent: *\nDisallow: /tmp\n"))
+        self.assertFalse(s.opts_out("User-agent: *\nDisallow: /tmp\nUser-agent: Googlebot\nDisallow: /\n"))
 
 
 class Checking(unittest.TestCase):
@@ -98,6 +110,21 @@ class Robots(unittest.TestCase):
         s.robots(self.path, fetch=lambda h: asked.append(h) or "", sleep=lambda _: None)
         self.assertEqual(asked, ["b.org"])
         self.assertEqual([r["robots_ai_optout"] for r in s.load(self.path)], ["FALSE", "FALSE"])
+
+    def test_recheck_asks_every_host_again(self):
+        s.save(self.rows([("a.org", "FALSE"), ("b.org", ""), ("c.org", "TRUE"), ("a.org", "FALSE")]), self.path)
+        asked = []
+
+        def fetch(host):
+            asked.append(host)
+            if host == "c.org":
+                raise OSError("timeout")
+            return "User-agent: *\nDisallow: /" if host == "a.org" else ""
+        import contextlib, io
+        with contextlib.redirect_stderr(io.StringIO()):
+            s.robots(self.path, fetch=fetch, sleep=lambda _: None, recheck=True)
+        self.assertEqual(asked, ["a.org", "b.org", "c.org"])
+        self.assertEqual([r["robots_ai_optout"] for r in s.load(self.path)], ["TRUE", "FALSE", "", "TRUE"])
 
 
 if __name__ == "__main__":

@@ -190,7 +190,7 @@ class Commands(unittest.TestCase):
         return code, out.getvalue()
 
     def snapshot_tasks(self, rows):
-        ss._write_csv(self.sheet / "tasks.csv", ss.TASK_COLUMNS, rows)
+        ss._write_csv(self.sheet / "private" / "tasks.csv", ss.TASK_COLUMNS, rows)
 
     def tree(self):
         return {str(p): p.read_bytes() for p in sorted(self.root.rglob("*")) if p.is_file()
@@ -236,7 +236,7 @@ class Commands(unittest.TestCase):
                 for t in ("2027-alpha-check_draft", "2027-beta-find_page", "2027-gamma-check_changes")]
         rows[1] |= {"task_id": "2027-beta-find_page", "status": "claimed", "claimed_by": "Sam", "claimed_on": "2026-12-10"}
         self.snapshot_tasks(rows)
-        ss._write_csv(self.sheet / ss.NEEDS_HELP_FILE, ["task_id", "reason"],
+        ss._write_csv(self.sheet / "private" / ss.NEEDS_HELP_FILE, ["task_id", "reason"],
                       [{"task_id": "2027-gamma-check_changes", "reason": "row 1: bad, date"}])
         code, out = self.run_main("push")
         self.assertIn("Tasks: 0 row(s) to paste", out)
@@ -245,6 +245,46 @@ class Commands(unittest.TestCase):
         self.assertEqual(lines[0], "Tasks row 3 (2027-beta-find_page): set status to open — claim from 2026-12-10 expired")
         self.assertIn("Tasks row 4 (2027-gamma-check_changes): set status to needs_help", lines[2])
         self.assertIn("Cell changes: 4", out)
+
+    def test_change_lines_use_real_sheet_rows_when_the_tab_has_blank_rows(self):
+        # Task 8 deferred item: positions come from the private copy as downloaded
+        (self.sheet / "private").mkdir(parents=True)
+        claimed = "2027-beta-find_page,beta,Beta,find_page,2,,,claimed,Sam,2026-12-10,"
+        (self.sheet / "private" / "tasks.csv").write_text(
+            ",".join(ss.TASK_COLUMNS) + "\n2027-alpha-check_draft,alpha,A,check_draft,10,,,open,,,\n,,,,,,,,,,\n\n"
+            + claimed + "\n", encoding="utf-8")
+        self.run_main("push")
+        self.assertTrue((self.sheet / "_changes.txt").read_text().startswith("Tasks row 5 (2027-beta-find_page)"))
+
+    def test_push_needs_the_private_copy_once_a_pull_has_run(self):
+        self.sheet.mkdir(parents=True)
+        ss._write_csv(self.sheet / "tasks.csv", ss.TASK_COLUMNS, [{"task_id": "2027-beta-find_page", "status": "done"}])
+        code, out = self.run_main("push")
+        self.assertEqual(code, 1)
+        self.assertIn("run `python3 scripts/sheet_sync.py pull` first", out)
+        self.assertFalse((self.sheet / "_to_paste_tasks.csv").exists())
+
+    def test_push_lists_unreadable_claims_and_waiting_sources(self):
+        # F19, F14
+        rows = [{c: "" for c in ss.TASK_COLUMNS} | {"task_id": t, "status": s, "claimed_on": d}
+                for t, s, d in (("2027-alpha-check_draft", "claimed", ""), ("2027-beta-find_page", "claimed", "soon"),
+                                ("2027-gamma-check_changes", "claimed", "2026-12-19"))]
+        self.snapshot_tasks(rows)
+        srcs = sources.load(self.root / "data" / "sources.csv")
+        srcs += [{**dict.fromkeys(sources.COLUMNS, ""), "org_id": "delta", "listing_url": "https://d.org", "kind": "html",
+                  "robots_ai_optout": "FALSE", "status_2027": "posted"},
+                 {**dict.fromkeys(sources.COLUMNS, ""), "org_id": "eps", "listing_url": "https://e.org", "kind": "html",
+                  "robots_ai_optout": "FALSE", "status_2027": "extracted"}]
+        sources.save(srcs, self.root / "data" / "sources.csv")
+        staging.upsert_org_facts(2027, [{"org_id": "beta", "registration_opens": "2027-02-04"}], self.root)
+        code, out = self.run_main("push")
+        self.assertEqual(code, 0, out)
+        self.assertIn("never released: Tasks row 2 (2027-alpha-check_draft)", out)
+        self.assertIn("never released: Tasks row 3 (2027-beta-find_page)", out)
+        self.assertNotIn("Tasks row 4 (2027-gamma", out.split("Cell changes")[1])
+        self.assertIn("Waiting, no task: delta: posted, waiting for the extraction skill", out)
+        self.assertIn("Waiting, no task: eps: extracted, but it has no staged rows", out)
+        self.assertIn("merge_staging.py --org-facts beta", out)
 
     def test_changed_org_uses_programs_rows_over_leftover_staging(self):
         staging.save("gamma", 2027, [{**dict.fromkeys(staging.STAGING_COLUMNS, ""), "program_id": "gamma-leftover-2027",
@@ -263,13 +303,13 @@ class Commands(unittest.TestCase):
         self.assertEqual(ids, ["gamma-leftover-2027"])
 
     def test_unreadable_snapshot_stops_push_and_missing_one_is_empty(self):
-        self.sheet.mkdir(parents=True)
-        (self.sheet / "tasks.csv").write_text("task_id,status\nt1,open\n", encoding="utf-8")  # columns missing
+        (self.sheet / "private").mkdir(parents=True)
+        (self.sheet / "private" / "tasks.csv").write_text("task_id,status\nt1,open\n", encoding="utf-8")  # columns missing
         code, out = self.run_main("push")
         self.assertEqual(code, 1)
         self.assertIn("Tasks", out)
         self.assertFalse((self.sheet / "_to_paste_tasks.csv").exists())
-        (self.sheet / "tasks.csv").unlink()
+        (self.sheet / "private" / "tasks.csv").unlink()
         self.assertEqual(self.run_main("push")[0], 0)
 
     def test_init_writes_headers_how_to_and_steps(self):
@@ -283,6 +323,8 @@ class Commands(unittest.TestCase):
         self.assertIn("Tasks, Drafts, Orgs, How to", out)
         self.assertIn("Plain text BEFORE pasting", out)
         self.assertIn("row 1", out)
+        self.assertIn("File > Import > Upload", out)
+        self.assertNotIn("Paste each header", out)
 
 
 class HowTo(unittest.TestCase):

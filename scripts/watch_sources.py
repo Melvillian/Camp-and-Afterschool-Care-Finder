@@ -112,7 +112,7 @@ def assess(row: dict, result: FetchResult, season: int, today: str):
         mentions = _mentions(text, season)
     previous = row.get("last_hash", "")
     row["last_checked"], row["last_hash"] = today, digest
-    if row["status_2027"] == "not_posted" and mentions:
+    if row["status_2027"] == "not_posted" and mentions and digest != previous:  # previous may be blank: first look
         row["status_2027"] = "posted"
         return row, f"POSTED: {org}"
     if row["status_2027"] == "merged" and previous and digest != previous:

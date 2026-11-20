@@ -4,3 +4,4 @@ __pycache__/
 data/staging/*/sheet/_to_paste_*.csv
 data/staging/*/sheet/_changes.txt
 data/staging/*/sheet/_init/
+data/staging/*/sheet/private/

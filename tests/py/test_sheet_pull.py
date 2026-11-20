@@ -33,7 +33,29 @@ class Parse(unittest.TestCase):
             ss.parse_tab("<!DOCTYPE html><html><body>Sign in</body></html>", ["task_id"], "Tasks")
 
     def test_tab_url_encodes_the_name(self):
-        self.assertTrue(ss.tab_url("ID", "How to").endswith("/d/ID/gviz/tq?tqx=out:csv&sheet=How%20to"))
+        self.assertTrue(ss.tab_url("ID", "How to").endswith("/d/ID/gviz/tq?tqx=out:csv&headers=1&sheet=How%20to"))
+
+
+    def test_positions_count_blank_rows(self):
+        rows, positions = ss.parse_tab_rows('task_id\nt1\n,\n\n"t\n2"\nt3\n', ["task_id"], "Tasks")
+        self.assertEqual(([r["task_id"] for r in rows], positions), (["t1", "t\n2", "t3"], [2, 5, 6]))
+
+    def test_guard_apostrophe_is_dropped_once(self):
+        rows = ss.parse_tab("a,b,c,d\n'=SUM(1),'-5,''+x,'plain\n", ["a"], "Tasks")
+        self.assertEqual(rows, [{"a": "=SUM(1)", "b": "-5", "c": "''+x", "d": "'plain"}])
+
+
+class Redact(unittest.TestCase):
+    def test_names_and_notes_blank_org_name_from_organizations_and_rows_keep_their_place(self):
+        text = ("task_id,org_id,org_name,kind,minutes,due,source_url,status,claimed_by,claimed_on,volunteer_notes,extra\n"
+                "t1,o1,<i>Evil</i>,find_page,2,,,claimed,Sam Smith,2027-01-05,call me 555-1234,junk\n"
+                ",,,,,,,,,,,\n"
+                "t2,zz,Typed,check_draft,10,2027-02-04,https://x.org,open,,,,\n")
+        back = list(csv.DictReader(io.StringIO(ss.redacted_tasks(text, {"o1": "Org One"}))))
+        self.assertEqual(list(back[0]), ss.TASK_COLUMNS)
+        self.assertEqual([(r["task_id"], r["org_name"], r["claimed_by"], r["claimed_on"], r["volunteer_notes"]) for r in back],
+                         [("t1", "Org One", "", "", ""), ("", "", "", "", ""), ("t2", "", "", "", "")])
+        self.assertEqual((back[0]["status"], back[2]["due"]), ("claimed", "2027-02-04"))
 
 
 class Diff(unittest.TestCase):
@@ -163,6 +185,16 @@ class Collect(unittest.TestCase):
         self.assertNotIn("o1", staged)
         self.assertIn("website", dict(rejected)["t1"])
 
+    def test_formula_cells_reject_the_task(self):
+        # F17: a cell still starting with '=' after the apostrophe guard is dropped
+        self.drafts[0]["description"] = '=HYPERLINK("https://evil.example","Book now")'
+        staged, _, rejected = self.run_collect()
+        self.assertNotIn("o1", staged)
+        self.assertIn("Drafts row 1: description starts with '='", dict(rejected)["t1"])
+        self.drafts[0]["description"] = ""
+        _, _, rejected = self.run_collect(orgs=[{"task_id": "t1", "org_id": "o1", "registration_notes": "=1+1"}])
+        self.assertIn("Orgs row: registration_notes starts with '='", dict(rejected)["t1"])
+
     def test_find_page_tasks_are_ignored_here(self):
         staged, orgs, rejected = self.run_collect()
         self.assertNotIn("o4", staged)
@@ -184,6 +216,15 @@ class FindPage(unittest.TestCase):
         urls, rejected = ss.find_page_urls(self.tasks(volunteer_notes="could not find it"), [], set())
         self.assertEqual(urls, {})
         self.assertEqual([t for t, _ in rejected], ["t4"])
+
+    def test_local_and_bare_ip_addresses_are_rejected(self):
+        # F8
+        for url in ("http://127.0.0.1:8000/admin", "http://localhost/x", "http://10.0.0.5/", "http://router.lan/",
+                    "http://2130706433/"):
+            urls, rejected = ss.find_page_urls(self.tasks(volunteer_notes=url), [], set())
+            self.assertEqual((urls, [t for t, _ in rejected]), ({}, ["t4"]), url)
+        urls, rejected = ss.find_page_urls(self.tasks(volunteer_notes="=HYPERLINK(\"https://o4.org\")"), [], set())
+        self.assertEqual((urls, [t for t, _ in rejected]), ({}, ["t4"]))
 
     def test_skips_already_done_open_and_other_kinds(self):
         self.assertEqual(ss.find_page_urls(self.tasks(volunteer_notes="https://a.org"), [], {"t4"}), ({}, []))
@@ -225,6 +266,7 @@ class PullCase(unittest.TestCase):
         # The fixture's Drafts rows name these live rows (as a check_changes task would).
         self.write_programs([("alpha-camp-2027", "alpha"), ("beta-camp-2027", "beta")])
         self.sheet = self.root / "data" / "staging" / "2027" / "sheet"
+        self.private = self.sheet / "private"
 
     def write_programs(self, ids_and_orgs, year="2027"):
         with open(self.root / "data" / "programs.csv", "w", newline="") as f:
@@ -253,15 +295,18 @@ class Pull(PullCase):
     def test_good_pull_writes_everything(self):
         code, out = self.pull()
         self.assertEqual(code, 0, out)
-        for name in ("tasks.csv", "drafts.csv", "orgs.csv", "snapshot.json", "_needs_help.csv"):
-            self.assertTrue((self.sheet / name).exists(), name)
+        self.assertEqual(sorted(str(p.relative_to(self.sheet)) for p in self.sheet.rglob("*") if p.is_file()),
+                         ["private/_needs_help.csv", "private/drafts.csv", "private/orgs.csv", "private/tasks.csv",
+                          "snapshot.json", "tasks.csv"])
+        for tab, name in (("Tasks", "tasks.csv"), ("Drafts", "drafts.csv"), ("Orgs", "orgs.csv")):
+            self.assertEqual((self.private / name).read_bytes(), fake_download()("ID", tab).encode())
         self.assertEqual(json.loads((self.sheet / "snapshot.json").read_text()), {"pulled_on": TODAY})
         staged = staging.load("alpha", 2027, self.root)
         self.assertEqual([r["program_id"] for r in staged], ["alpha-camp-2027", "alpha-added-by-hand-2027"])
         self.assertFalse(staging.staging_path("beta", 2027, self.root).exists())
         facts = staging.load_org_facts(2027, self.root)
         self.assertEqual([(f["org_id"], f["registration_opens"]) for f in facts], [("alpha", "2027-03-01")])
-        helped = self.read_csv(self.sheet / "_needs_help.csv")
+        helped = self.read_csv(self.private / "_needs_help.csv")
         self.assertEqual([h["task_id"] for h in helped], ["t-beta"])
         self.assertIn("start_date", helped[0]["reason"])
         self.assertIn("t-beta", out)
@@ -278,6 +323,45 @@ class Pull(PullCase):
         fact = staging.load_org_facts(2027, self.root)[0]
         self.assertEqual((fact["registration_opens"], fact["registration_opens_early"], fact["registration_notes"]),
                          ("2027-03-01", "", "Opens at noon"))
+
+    def test_new_host_blanks_robots_and_hash_and_prints_both_addresses(self):
+        # F8: the robots answer and hash belonged to the old site
+        rows = sources.load(self.root / "data" / "sources.csv")
+        rows[0].update(robots_ai_optout="FALSE", last_hash="abc")
+        sources.save(rows, self.root / "data" / "sources.csv")
+        code, out = self.pull()
+        gamma = next(r for r in sources.load(self.root / "data" / "sources.csv") if r["org_id"] == "gamma")
+        self.assertEqual((gamma["robots_ai_optout"], gamma["last_hash"]), ("", ""))
+        self.assertIn("page for gamma: https://old.example.org -> https://gamma.example.org/summer.pdf", out)
+        self.assertIn("run sources.py robots", out)
+
+    def test_same_host_keeps_robots_answer(self):
+        rows = sources.load(self.root / "data" / "sources.csv")
+        rows[0].update(listing_url="https://gamma.example.org/old", robots_ai_optout="FALSE", last_hash="abc")
+        sources.save(rows, self.root / "data" / "sources.csv")
+        self.pull()
+        gamma = next(r for r in sources.load(self.root / "data" / "sources.csv") if r["org_id"] == "gamma")
+        self.assertEqual((gamma["listing_url"], gamma["robots_ai_optout"], gamma["last_hash"]),
+                         ("https://gamma.example.org/summer.pdf", "FALSE", "abc"))
+
+    def test_committed_tasks_csv_is_redacted(self):
+        # F10: the only committed copy of the Sheet has no names, notes or Sheet-typed organization names
+        self.pull()
+        tasks = self.read_csv(self.sheet / "tasks.csv")
+        self.assertEqual([t["task_id"] for t in tasks], ["t-alpha", "t-beta", "t-gamma", "t-delta"])
+        self.assertEqual({t["claimed_by"] + t["claimed_on"] + t["volunteer_notes"] for t in tasks}, {""})
+        self.assertEqual([t["org_name"] for t in tasks], ["Alpha", "Beta", "Gamma", "Delta"])
+        self.assertNotIn("Sam", (self.sheet / "tasks.csv").read_text())
+        self.assertIn("Sam", (self.private / "tasks.csv").read_text())
+
+    def test_fresh_clone_without_the_private_copy_does_not_restage_done_tasks(self):
+        self.pull()
+        shutil.rmtree(self.private)
+        staging.save("alpha", 2027, [], self.root)
+        code, out = self.pull()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(staging.load("alpha", 2027, self.root), [])
+        self.assertNotIn("staged", out)
 
     def test_find_page_for_org_without_a_sources_row_adds_one(self):
         sources.save([], self.root / "data" / "sources.csv")
@@ -299,12 +383,12 @@ class Pull(PullCase):
         code, out = self.pull(fake_download(Drafts=fixed))
         self.assertEqual(code, 0)
         self.assertEqual([r["program_id"] for r in staging.load("beta", 2027, self.root)], ["beta-camp-2027"])
-        self.assertEqual(self.read_csv(self.sheet / "_needs_help.csv"), [])
+        self.assertEqual(self.read_csv(self.private / "_needs_help.csv"), [])
 
     def test_rejected_task_stays_listed_on_every_pull(self):
         self.pull()
         self.pull()
-        self.assertEqual([h["task_id"] for h in self.read_csv(self.sheet / "_needs_help.csv")], ["t-beta"])
+        self.assertEqual([h["task_id"] for h in self.read_csv(self.private / "_needs_help.csv")], ["t-beta"])
 
     def test_prints_task_diff_and_draft_changes(self):
         self.pull()
@@ -356,7 +440,7 @@ class PullSafety(PullCase):
         code, out = self.pull(fake_download(Tasks=bad))
         self.assertEqual(code, 0, out)
         self.assertFalse(staging.staging_path("alpha", 2027, self.root).exists())
-        self.assertIn("t-alpha", [h["task_id"] for h in self.read_csv(self.sheet / "_needs_help.csv")])
+        self.assertIn("t-alpha", [h["task_id"] for h in self.read_csv(self.private / "_needs_help.csv")])
         code, out = self.pull()
         self.assertEqual([r["program_id"] for r in staging.load("alpha", 2027, self.root)],
                          ["alpha-camp-2027", "alpha-added-by-hand-2027"])
@@ -364,17 +448,17 @@ class PullSafety(PullCase):
     def test_duplicate_done_task_id_is_listed(self):
         dup = (FIXTURES / "tasks.csv").read_text() + "t-alpha,alpha,Alpha Camp,check_draft,10,,,done,Zed,,\n"
         self.pull(fake_download(Tasks=dup))
-        self.assertIn("t-alpha", [h["task_id"] for h in self.read_csv(self.sheet / "_needs_help.csv")])
+        self.assertIn("t-alpha", [h["task_id"] for h in self.read_csv(self.private / "_needs_help.csv")])
 
     def test_crash_while_staging_leaves_the_previous_snapshot(self):
         from unittest import mock
         self.pull()
-        snap = {p.name: p.read_bytes() for p in self.sheet.iterdir()}
+        snap = {p: p.read_bytes() for p in self.sheet.rglob("*") if p.is_file()}
         fixed = (FIXTURES / "drafts.csv").read_text().replace("7/5/2027", "2027-07-05")
         with mock.patch.object(staging, "save", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 self.pull(fake_download(Drafts=fixed), today="2027-02-02")
-        self.assertEqual({p.name: p.read_bytes() for p in self.sheet.iterdir()}, snap)
+        self.assertEqual({p: p.read_bytes() for p in self.sheet.rglob("*") if p.is_file()}, snap)
 
     def test_hand_added_row_never_takes_an_existing_program_id(self):
         self.write_programs([("alpha-camp-2027", "alpha"), ("alpha-added-by-hand-2027", "alpha")])

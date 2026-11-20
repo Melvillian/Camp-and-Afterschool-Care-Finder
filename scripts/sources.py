@@ -1,6 +1,8 @@
 """The list of organization pages watched for new-season camp listings (data/sources.csv)."""
 import csv
 import datetime as dt
+import ipaddress
+import re
 import sys
 import time
 import urllib.error
@@ -19,7 +21,9 @@ COLUMNS = ["org_id", "listing_url", "kind", "robots_ai_optout", "expected_open",
 KINDS = {"html", "pdf", "rec1", "gated", "manual"}
 STATUSES = {"not_posted", "posted", "extracted", "merged", "changed", "not_running"}
 ROBOTS_VALUES = {"", "TRUE", "FALSE"}
-AI_CRAWLERS = ("gptbot", "claudebot", "anthropic-ai", "ccbot", "google-extended", "perplexitybot")
+AI_CRAWLERS = ("gptbot", "chatgpt-user", "oai-searchbot", "claudebot", "claude-web", "claude-user", "anthropic-ai",
+               "ccbot", "google-extended", "perplexitybot", "bytespider", "amazonbot", "applebot-extended",
+               "meta-externalagent")
 
 USER_AGENT = "CampFinderVT/1.0 (+https://github.com/kefortney/Camp-and-Afterschool-Care-Finder)"
 DELAY_SECONDS = 2
@@ -95,13 +99,72 @@ def guess_kind(url: str) -> str:
     return "html"
 
 
-def names_ai_crawler(robots_txt: str) -> bool:
-    """True when any User-agent line names a known AI crawler."""
+def _lines(robots_txt: str):
+    """(field, value) for each robots.txt line, comments removed, field lowercased."""
     for line in robots_txt.splitlines():
         key, _, value = line.split("#", 1)[0].partition(":")
-        if key.strip().lower() == "user-agent" and value.strip().lower() in AI_CRAWLERS:
-            return True
+        yield key.strip().lower(), value.strip()
+
+
+LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
+
+
+def public_url_problem(url: str) -> str | None:
+    """Why a page address typed by a volunteer must not be fetched, or None when it is an ordinary public site.
+
+    Refuses anything but http(s), bare IP addresses (in any spelling), and local or single-label host names.
+    It does not look the name up, so a public name pointing at a private address still needs a person's eye.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "not an http(s) address"
+    try:
+        host = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return "not a readable address"
+    if not host:
+        return "no site name"
+    try:
+        ipaddress.ip_address(host)
+        return "a bare IP address, not a site name"
+    except ValueError:
+        pass
+    if all(re.fullmatch(r"0x[0-9a-f]*|\d+", label) for label in host.split(".")):
+        return "a bare IP address, not a site name"
+    if host == "localhost" or host.endswith(LOCAL_SUFFIXES) or "." not in host:
+        return "a local or private site name"
+    return None
+
+
+def same_site(a: str, b: str) -> bool:
+    """Both addresses have the same host (case and a leading www. ignored)."""
+    host = lambda url: (urlparse(url).hostname or "").lower().removeprefix("www.")
+    return bool(host(a)) and host(a) == host(b)
+
+
+def names_ai_crawler(robots_txt: str) -> bool:
+    """True when any User-agent line names a known AI crawler."""
+    return any(key == "user-agent" and value.lower() in AI_CRAWLERS for key, value in _lines(robots_txt))
+
+
+def blanket_disallow(robots_txt: str) -> bool:
+    """True when a group for every crawler (`User-agent: *`) has `Disallow: /`."""
+    agents, in_rules = set(), False
+    for key, value in _lines(robots_txt):
+        if key == "user-agent":
+            if in_rules:
+                agents, in_rules = set(), False
+            agents.add(value)
+        elif key in ("allow", "disallow"):
+            in_rules = True
+            if key == "disallow" and value == "/" and "*" in agents:
+                return True
     return False
+
+
+def opts_out(robots_txt: str) -> bool:
+    """The site has asked AI crawlers to stay away: one is named, or every crawler is turned away."""
+    return names_ai_crawler(robots_txt) or blanket_disallow(robots_txt)
 
 
 def _read_csv(path) -> list[dict]:
@@ -143,27 +206,28 @@ def fetch_robots(host: str) -> str:
         raise
 
 
-def robots(path=SOURCES_CSV, fetch=fetch_robots, sleep=time.sleep) -> dict[str, str]:
-    """Fill blank robots_ai_optout per distinct host; return host -> value ('' on failure).
+def robots(path=SOURCES_CSV, fetch=fetch_robots, sleep=time.sleep, recheck=False) -> dict[str, str]:
+    """Fill robots_ai_optout per distinct host; return host -> value ('' on failure).
 
-    Rows that already say TRUE or FALSE are left alone and their hosts are not asked again.
+    Without recheck, rows that already say TRUE or FALSE are left alone and their hosts are not asked again.
+    With recheck, every host is asked again and every row is rewritten (a failure leaves it blank).
     """
     rows = load(path)
     results: dict[str, str] = {}
     for row in rows:
         host = urlparse(row["listing_url"]).hostname
-        if not host or host in results or row["robots_ai_optout"]:
+        if not host or host in results or (row["robots_ai_optout"] and not recheck):
             continue
         if results:
             sleep(DELAY_SECONDS)
         try:
-            results[host] = "TRUE" if names_ai_crawler(fetch(host)) else "FALSE"
+            results[host] = "TRUE" if opts_out(fetch(host)) else "FALSE"
         except Exception as exc:  # any failure leaves the flag blank
             print(f"robots.txt failed for {host}: {exc}", file=sys.stderr)
             results[host] = ""
     for row in rows:
         host = urlparse(row["listing_url"]).hostname
-        if host and not row["robots_ai_optout"]:
+        if host and (recheck or not row["robots_ai_optout"]):
             row["robots_ai_optout"] = results[host]
     save(rows, path)
     return results
@@ -174,7 +238,7 @@ def main(argv: list[str]) -> int:
     if cmd == "seed":
         print(f"added {seed()} rows; {len(load())} total")
     elif cmd == "robots":
-        res = robots()
+        res = robots(recheck="--recheck" in argv[2:])
         print(f"{len(res)} hosts: {sum(v == 'TRUE' for v in res.values())} name AI crawlers, "
               f"{sum(v == '' for v in res.values())} failed")
     elif cmd == "check":
@@ -182,7 +246,7 @@ def main(argv: list[str]) -> int:
         print("\n".join(problems) if problems else "no problems")
         return 1 if problems else 0
     else:
-        print("usage: sources.py seed|robots|check", file=sys.stderr)
+        print("usage: sources.py seed | robots [--recheck] | check", file=sys.stderr)
         return 2
     return 0
 

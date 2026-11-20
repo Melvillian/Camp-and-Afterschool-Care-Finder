@@ -24,6 +24,15 @@ class Assess(unittest.TestCase):
         row, msg = w.assess(ROW(), R(b"<p>Summer 2027 camps</p>"), 2027, "2026-12-15")
         self.assertEqual((row["status_2027"], row["last_checked"], msg), ("posted", "2026-12-15", "POSTED: o1"))
 
+    def test_unchanged_page_is_not_flagged_posted_again(self):
+        # F11: the skill found nothing and set not_posted; the same page next week stays not_posted
+        page = b"<p>Check back in January for 2027 dates</p>"
+        same = w.content_hash(w.visible_text(page.decode()))
+        row, msg = w.assess(ROW(last_hash=same), R(page), 2027, "2026-12-22")
+        self.assertEqual((row["status_2027"], msg, row["last_checked"]), ("not_posted", None, "2026-12-22"))
+        row, msg = w.assess(ROW(last_hash=same), R(b"<p>2027 sessions are up</p>"), 2027, "2026-12-29")
+        self.assertEqual((row["status_2027"], msg), ("posted", "POSTED: o1"))
+
     def test_not_posted_stays_when_season_absent_or_only_in_script(self):
         for body in (b"<p>Summer 2026</p>", b"<script>x=2027</script><p>Soon</p>", b"<p>call 802-555-20270</p>"):
             row, msg = w.assess(ROW(), R(body), 2027, "2026-12-15")

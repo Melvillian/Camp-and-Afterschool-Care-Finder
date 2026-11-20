@@ -5,9 +5,11 @@ Usage: python3 scripts/sheet_sync.py pull | push | init
 push works out which rows to add to the Sheet and which cells to change, and writes files for a maintainer to
 paste in by hand (nothing can write to the Sheet yet). init writes the header rows for setting up a new Sheet.
 
-pull downloads the Tasks, Drafts and Orgs tabs through the Sheet's public CSV export, saves them as a
-dated snapshot under data/staging/<season>/sheet/, prints what changed since the last snapshot, and turns
-finished tasks into staging files. Nothing is written unless all three tabs download and parse.
+pull downloads the Tasks, Drafts and Orgs tabs through the Sheet's public CSV export, prints what changed
+since the last pull, and turns finished tasks into staging files. Nothing is written unless all three tabs
+download and parse. It keeps the tabs exactly as downloaded in data/staging/<season>/sheet/private/ (git-ignored:
+volunteers' names, notes and unreviewed text stay on this machine) and writes the only committed copy,
+sheet/tasks.csv with names and notes blanked, plus sheet/snapshot.json with the date.
 """
 import argparse
 import csv
@@ -39,7 +41,9 @@ ORG_COLUMNS = ["task_id", "org_id", "registration_opens", "registration_opens_ea
                "financial_aid_available", "financial_aid_notes", "website"]
 TABS = (("Tasks", TASK_COLUMNS), ("Drafts", DRAFT_COLUMNS), ("Orgs", ORG_COLUMNS))
 SNAPSHOT_DIR = "sheet"
-NEEDS_HELP_FILE = "_needs_help.csv"
+PRIVATE_DIR = "private"  # inside SNAPSHOT_DIR; git-ignored
+NEEDS_HELP_FILE = "_needs_help.csv"  # inside PRIVATE_DIR: its reasons quote Sheet text
+REDACTED = ("claimed_by", "claimed_on", "volunteer_notes")
 URL_RE = re.compile(r"https?://\S+")
 STALE_CLAIM_DAYS = 3
 HAND_ENTRY_KINDS = {"rec1", "gated", "manual"}
@@ -57,7 +61,8 @@ class SheetError(Exception):
 
 
 def tab_url(sheet_id: str, tab: str) -> str:
-    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={quote(tab)}"
+    # headers=1: the first row is the header. Without it gviz guesses, and in all-text tabs may fold rows into it.
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&headers=1&sheet={quote(tab)}"
 
 
 def download_tab(sheet_id: str, tab: str) -> str:
@@ -72,26 +77,73 @@ def download_tab(sheet_id: str, tab: str) -> str:
         raise SheetError(f"could not download the {tab} tab: {getattr(exc, 'reason', exc)}") from exc
 
 
-def parse_tab(text: str, required: list[str], tab: str) -> list[dict]:
-    """Rows of a tab as dicts: header names and values stripped, blank rows dropped, extra columns kept."""
+def clean_cell(value: str) -> str:
+    """A cell as pulled: stripped, and one leading apostrophe dropped when it guards = + - or @ (push adds it)."""
+    value = value.strip()
+    return value[1:] if value[:1] == "'" and value[1:2] in ("=", "+", "-", "@") else value
+
+
+def _records(text: str, tab: str) -> list[list[str]]:
     if re.match(r"\s*<(!doctype|html)", text[:200], re.I):
         raise SheetError(f"{tab} tab came back as a web page, not CSV "
                          "(is the Sheet shared so anyone with the link can view it?)")
     try:
-        table = [r for r in csv.reader(io.StringIO(text.lstrip("\ufeff"))) if any(c.strip() for c in r)]
+        return list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
     except csv.Error as exc:
         raise SheetError(f"{tab} tab could not be read as CSV: {exc}") from exc
-    if not table:
+
+
+def parse_tab_rows(text: str, required: list[str], tab: str) -> tuple[list[dict], list[int]]:
+    """Rows of a tab as dicts (see parse_tab), and each row's position in the Sheet (the header row is 1).
+
+    Positions count the blank rows that the dicts leave out, so they match the Sheet's row numbers.
+    """
+    records = _records(text, tab)
+    filled = [(i, r) for i, r in enumerate(records, 1) if any(c.strip() for c in r)]
+    if not filled:
         raise SheetError(f"{tab} tab is empty")
-    header = [h.strip() for h in table[0]]
+    header = [h.strip() for h in filled[0][1]]
     missing = [c for c in required if c not in header]
     if missing:
         raise SheetError(f"{tab} tab is missing column(s): {', '.join(missing)}")
-    rows = []
-    for cells in table[1:]:
-        row = {h: (cells[i].strip() if i < len(cells) else "") for i, h in enumerate(header) if h}
-        rows.append(row)
-    return rows
+    rows, positions = [], []
+    for position, cells in filled[1:]:
+        rows.append({h: (clean_cell(cells[i]) if i < len(cells) else "") for i, h in enumerate(header) if h})
+        positions.append(position - filled[0][0] + 1)
+    return rows, positions
+
+
+def parse_tab(text: str, required: list[str], tab: str) -> list[dict]:
+    """Rows of a tab as dicts: header names and values stripped (see clean_cell), blank rows dropped,
+    extra columns kept."""
+    return parse_tab_rows(text, required, tab)[0]
+
+
+def redacted_tasks(text: str, org_names: dict[str, str]) -> str:
+    """The Tasks tab as it may be committed and served: the task columns only, claimed_by, claimed_on and
+    volunteer_notes blank, org_name from organizations.csv (blank when unknown). Blank rows are kept so each
+    task stays on its Sheet row number (the Volunteer page links to it)."""
+    records = _records(text, "Tasks")
+    start = next(i for i, r in enumerate(records) if any(c.strip() for c in r))
+    header = [h.strip() for h in records[start]]
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerows([[""] * len(TASK_COLUMNS)] * start)
+    w.writerow(TASK_COLUMNS)
+    for cells in records[start + 1:]:
+        if not any(c.strip() for c in cells):
+            w.writerow([""] * len(TASK_COLUMNS))
+            continue
+        row = {h: clean_cell(cells[i]) for i, h in enumerate(header) if h and i < len(cells)}
+        row.update(dict.fromkeys(REDACTED, ""), org_name=org_names.get(row.get("org_id", ""), ""))
+        w.writerow([row.get(c, "") for c in TASK_COLUMNS])
+    return buf.getvalue()
+
+
+def formula_problems(rows: list[dict], label) -> list[str]:
+    """A cell that still starts with '=' after the pull would be a formula if pasted back: reject it."""
+    return [f"{label(i)}: {col} starts with '=': remove the formula and type the value"
+            for i, row in enumerate(rows, 1) for col, value in row.items() if (value or "").startswith("=")]
 
 
 def diff_tasks(old: list[dict], new: list[dict]) -> list[str]:
@@ -166,18 +218,25 @@ def _org_row(task: dict, orgs: list[dict]) -> dict | None:
 
 
 def find_page_urls(tasks, orgs, already_done) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """org_id -> page address for each newly done find_page task, plus (task_id, reason) for those with none."""
+    """org_id -> page address for each newly done find_page task, plus (task_id, reason) for those rejected:
+    no address, a formula, or an address that is not an ordinary public site (sources.public_url_problem)."""
     urls, rejected = {}, []
     for task in _new_done(tasks, already_done, True):
+        org = _org_row(task, orgs)
+        problems = formula_problems([task], lambda i: "Tasks row") + formula_problems([org or {}], lambda i: "Orgs row")
+        if problems:
+            rejected.append((task["task_id"], "; ".join(problems)))
+            continue
         match = URL_RE.search(task.get("volunteer_notes", ""))
         url = match.group(0).rstrip(".,;)") if match else ""
         if not url:
-            org = _org_row(task, orgs)
             url = (org or {}).get("website", "")
-        if URL_RE.fullmatch(url):
-            urls[task["org_id"]] = url
-        else:
+        if not URL_RE.fullmatch(url):
             rejected.append((task["task_id"], "no web address: put the page in volunteer_notes or the Orgs website"))
+        elif problem := sources.public_url_problem(url):
+            rejected.append((task["task_id"], f"{url[:80]} is {problem}: give the organization's own public page"))
+        else:
+            urls[task["org_id"]] = url
     return urls, rejected
 
 
@@ -200,7 +259,9 @@ def collect_done(tasks, drafts, orgs, already_done, org_ids, season, today, take
         if not rows and not org_row:
             rejected.append((tid, "no rows"))
             continue
-        problems = []
+        problems = formula_problems([task], lambda i: "Tasks row")
+        problems += formula_problems(rows, lambda i: f"Drafts row {i}")
+        problems += formula_problems([org_row] if org_row else [], lambda i: "Orgs row")
         if org not in org_ids:
             problems.append(f"org_id '{org}' is not in organizations.csv")
         problems += [f"row {i}: org_id '{r['org_id']}' is not '{org}'" for i, r in enumerate(rows, 1)
@@ -247,8 +308,7 @@ def _write_csv(path: Path, columns: list[str], rows: list[dict]) -> None:
             w.writerow([row.get(c, "") for c in columns])
 
 
-def _previous(folder: Path, name: str, columns: list[str], tab: str) -> list[dict]:
-    path = folder / f"{name}.csv"
+def _previous(path: Path, columns: list[str], tab: str) -> list[dict]:
     if not path.exists():
         return []
     try:
@@ -264,16 +324,29 @@ def _read_needs_help(path: Path) -> set[str]:
         return {r.get("task_id", "") for r in csv.DictReader(f)}
 
 
-def _apply_urls(urls: dict[str, str], path: Path) -> None:
+def _apply_urls(urls: dict[str, str], path: Path) -> list[str]:
+    """Write the new page addresses into sources.csv; one line per address, old and new side by side.
+
+    On a new host the robots answer and the page hash belonged to the old site, so both are blanked: the
+    source is hand-entry only until `sources.py robots` has asked the new host.
+    """
     rows = sources.load(path)
+    lines = []
     for org, url in urls.items():
         row = next((r for r in rows if r["org_id"] == org), None)
         if row is None:
             row = {**dict.fromkeys(sources.COLUMNS, ""), "org_id": org, "status_2027": "not_posted"}
             rows.append(row)
+        old = row["listing_url"]
+        new_host = not sources.same_site(old, url)
+        if new_host:
+            row["robots_ai_optout"], row["last_hash"] = "", ""
         row["listing_url"], row["kind"] = url, sources.guess_kind(url)
         row["notes"] = "; ".join(n for n in row["notes"].split("; ") if n and not n.startswith("fetch failed "))
+        lines.append(f"page for {org}: {old or '(none)'} -> {url}"
+                     + ("  [new site: robots_ai_optout blanked, run sources.py robots]" if new_host else ""))
     sources.save(rows, path)
+    return lines
 
 
 def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sleep=time.sleep) -> int:
@@ -283,13 +356,15 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
     config = ingest_config.load()
     season = config["season"]
     folder = root / "data" / "staging" / str(season) / SNAPSHOT_DIR
+    private = folder / PRIVATE_DIR
 
-    tabs = {}
+    tabs, texts = {}, {}
     try:
         for i, (tab, columns) in enumerate(TABS):
             if i:
                 sleep(sources.DELAY_SECONDS)
-            tabs[tab] = parse_tab(download(config["sheet_id"], tab), columns, tab)
+            texts[tab] = download(config["sheet_id"], tab)
+            tabs[tab] = parse_tab(texts[tab], columns, tab)
     except SheetError as exc:
         print(str(exc))
         return 1
@@ -299,13 +374,17 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
 
     tasks, task_messages, skipped_done = check_tasks(tabs["Tasks"])
     drafts, orgs = tabs["Drafts"], tabs["Orgs"]
-    old_tasks = _previous(folder, "tasks", TASK_COLUMNS, "Tasks")
-    old_drafts = _previous(folder, "drafts", DRAFT_COLUMNS, "Drafts")
+    # The private copy is the last pull as downloaded. On a machine without it (a fresh clone), the committed
+    # tasks.csv still says which tasks were done, so they are not staged a second time.
+    old_tasks = (_previous(private / "tasks.csv", TASK_COLUMNS, "Tasks")
+                 or _previous(folder / "tasks.csv", TASK_COLUMNS, "Tasks"))
+    old_drafts = _previous(private / "drafts.csv", DRAFT_COLUMNS, "Drafts")
     already_done = ({t["task_id"] for t in old_tasks if t["status"] == "done"}
-                    - _read_needs_help(folder / NEEDS_HELP_FILE))
+                    - _read_needs_help(private / NEEDS_HELP_FILE))
 
     with open(root / "data" / "organizations.csv", newline="", encoding="utf-8") as f:
-        org_ids = {r["org_id"] for r in csv.DictReader(f)}
+        org_names = {r["org_id"]: r.get("org_name", "") for r in csv.DictReader(f)}
+    org_ids = set(org_names)
     programs = _read_csv_rows(root / "data" / "programs.csv")
     existing_ids = {r["program_id"] for r in programs}
     known_ids: dict[str, set] = {}
@@ -339,15 +418,16 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
     if facts:
         staging.replace_org_facts(season, facts, root)  # a reviewed Orgs row: a cleared cell clears the fact
     if urls:
-        _apply_urls(urls, root / "data" / "sources.csv")
-        for org, url in urls.items():
-            print(f"page for {org}: {url}")
+        for line in _apply_urls(urls, root / "data" / "sources.csv"):
+            print(line)
     # The snapshot goes last: a crash above leaves the old one, so the next pull redoes the work.
-    _write_csv(folder / NEEDS_HELP_FILE, ["task_id", "reason"],
+    _write_csv(private / NEEDS_HELP_FILE, ["task_id", "reason"],
                [{"task_id": t, "reason": r} for t, r in rejected])
-    for tab_name, name, columns in (("Tasks", "tasks", TASK_COLUMNS), ("Drafts", "drafts", DRAFT_COLUMNS),
-                                    ("Orgs", "orgs", ORG_COLUMNS)):
-        _write_csv(folder / f"{name}.csv", columns, tabs[tab_name])
+    for tab_name, name in (("Tasks", "tasks"), ("Drafts", "drafts"), ("Orgs", "orgs")):
+        with open(private / f"{name}.csv", "w", newline="", encoding="utf-8") as f:
+            f.write(texts[tab_name])
+    with open(folder / "tasks.csv", "w", newline="", encoding="utf-8") as f:
+        f.write(redacted_tasks(texts["Tasks"], org_names))
     (folder / "snapshot.json").write_text(json.dumps({"pulled_on": today}) + "\n", encoding="utf-8")
     for tid, reason in rejected:
         print(f"NEEDS HELP {tid}: {reason}")
@@ -401,6 +481,19 @@ def _next_task_id(org_id: str, kind: str, season: int, snapshot: list[dict], rej
     if kind not in REPEATABLE or any(t.get("status") != "done" or t.get("task_id") in rejected for _, t in same):
         return None
     return task_id(org_id, kind, season, max(n for n, _ in same) + 1)
+
+
+def unreadable_claims(tasks: list[dict]) -> list[str]:
+    """Claimed tasks whose claimed_on is blank or not a date: they are never released, so a person must ask."""
+    out = []
+    for t in tasks:
+        if t.get("status") != "claimed":
+            continue
+        try:
+            dt.date.fromisoformat(t.get("claimed_on", ""))
+        except ValueError:
+            out.append(t["task_id"])
+    return out
 
 
 def _release_stale(tasks: list[dict], today: str, skip: set[str]) -> list[tuple[str, str, str, str]]:
@@ -480,12 +573,35 @@ def write_paste_file(path: Path, columns: list[str], rows: list[dict]) -> None:
             w.writerow([paste_cell(row.get(c, "")) for c in columns])
 
 
-def change_lines(changes, snapshot_tasks: list[dict]) -> list[str]:
-    position = {t.get("task_id"): i for i, t in enumerate(snapshot_tasks)}
+def change_lines(changes, snapshot_tasks: list[dict], sheet_rows: list[int] | None = None) -> list[str]:
+    """One line per cell to change. sheet_rows: each snapshot task's Sheet row (default: no blank rows)."""
+    sheet_rows = sheet_rows or [i + 2 for i in range(len(snapshot_tasks))]
+    position = {}
+    for t, row in zip(snapshot_tasks, sheet_rows):
+        position.setdefault(t.get("task_id"), row)
     lines = []
     for tid, column, value, reason in changes:
         what = f"clear {column}" if value == "" else f"set {column} to {' '.join(value.split())}"
-        lines.append(f"Tasks row {position[tid] + 2} ({tid}): {what} \u2014 {reason}")
+        lines.append(f"Tasks row {position[tid]} ({tid}): {what} \u2014 {reason}")
+    return lines
+
+
+def waiting_lines(source_rows, staged: dict[str, list[dict]], fact_orgs, plan: PushPlan) -> list[str]:
+    """Organizations waiting on the maintainer, for which push makes no task."""
+    tasked = {t["org_id"] for t in plan.new_tasks}
+    lines = []
+    for src in source_rows:
+        org, status = src["org_id"], src["status_2027"]
+        if org in tasked:
+            continue
+        if status == "extracted" and not staged.get(org):
+            lines.append(f"{org}: extracted, but it has no staged rows (run the skill again or set the status)")
+        elif status == "posted" and task_for(src, False) is None:
+            lines.append(f"{org}: posted, waiting for the extraction skill")
+    for org in fact_orgs:
+        if not any(r.get("review") != "merged" for r in staged.get(org, [])):
+            lines.append(f"{org}: organization facts staged with no rows to merge "
+                         f"(look them over, then merge_staging.py --org-facts {org})")
     return lines
 
 
@@ -527,22 +643,28 @@ def push(root: Path = ROOT, today: str | None = None) -> int:
         if src["status_2027"] == "changed" and live.get(src["org_id"]):
             staged[src["org_id"]] = live[src["org_id"]]
 
-    snapshot = []
-    if (folder / "tasks.csv").exists():  # a missing snapshot is empty; an unreadable one must not re-offer every task
+    private = folder / PRIVATE_DIR
+    snapshot, sheet_rows = [], []
+    # A missing snapshot is empty (the first push); an unreadable one must not re-offer every task.
+    if (private / "tasks.csv").exists():
         try:
-            snapshot = parse_tab((folder / "tasks.csv").read_text(encoding="utf-8"), TASK_COLUMNS, "Tasks")
+            snapshot, sheet_rows = parse_tab_rows((private / "tasks.csv").read_text(encoding="utf-8"), TASK_COLUMNS, "Tasks")
         except SheetError as exc:
             print(f"the saved Tasks snapshot cannot be read, so nothing was written: {exc}")
             return 1
+    elif (folder / "tasks.csv").exists():
+        print(f"{private} is missing (it is kept only on the machine that pulled): "
+              "run `python3 scripts/sheet_sync.py pull` first. Nothing was written.")
+        return 1
     plan = plan_push(source_rows, orgs, staged, snapshot, season, today,
-                     needs_help=_read_needs_help_pairs(folder / NEEDS_HELP_FILE))
+                     needs_help=_read_needs_help_pairs(private / NEEDS_HELP_FILE))
 
     counts = {}
     for tab, name, columns in PASTE_FILES:
         rows = {"Tasks": plan.new_tasks, "Drafts": plan.new_drafts, "Orgs": plan.new_orgs}[tab]
         write_paste_file(folder / name, columns, rows)
         counts[tab] = len(rows)
-    lines = change_lines(plan.cell_changes, snapshot)
+    lines = change_lines(plan.cell_changes, snapshot, sheet_rows)
     (folder / CHANGES_FILE).write_text("".join(f"{l}\n" for l in lines), encoding="utf-8")
 
     by_kind = {}
@@ -555,6 +677,12 @@ def push(root: Path = ROOT, today: str | None = None) -> int:
     print(f"Cell changes: {len(lines)} (see {CHANGES_FILE})")
     print(f"Files are in {folder}. For each tab: File > Import > Upload the _to_paste file, choose "
           "'Append to current sheet', separator 'Comma', and turn OFF 'Convert text to numbers, dates and formulas'.")
+    row_of = dict(zip((t["task_id"] for t in snapshot), sheet_rows))
+    for tid in unreadable_claims(snapshot):
+        print(f"Claimed with no readable claimed_on, so never released: Tasks row {row_of[tid]} ({tid}). Ask the volunteer.")
+    fact_orgs = [f["org_id"] for f in staging.load_org_facts(season, root)]
+    for line in waiting_lines(source_rows, staged, fact_orgs, plan):
+        print(f"Waiting, no task: {line}")
     return 0
 
 
@@ -571,8 +699,9 @@ def init(root: Path = ROOT) -> int:
     print("  1. Name the four tabs exactly: Tasks, Drafts, Orgs, How to")
     print("  2. In each tab, select all cells and set Format > Number > Plain text BEFORE pasting anything "
           "(Google's CSV export otherwise guesses column types and can blank cells or reformat dates)")
-    print("  3. Paste each header file into row 1 of its tab: tasks_header.csv into Tasks, drafts_header.csv "
-          "into Drafts, orgs_header.csv into Orgs")
+    print("  3. Put each header file into row 1 of its tab with File > Import > Upload, 'Append to current sheet', "
+          "separator 'Comma', 'Convert text to numbers, dates and formulas' OFF (pasting the text puts it all in "
+          "one cell): tasks_header.csv into Tasks, drafts_header.csv into Drafts, orgs_header.csv into Orgs")
     print("  4. Paste the text of how_to.txt into cell A1 of the How to tab")
     print("  5. Run `python3 scripts/sheet_sync.py push`, then import the _to_paste files as it explains")
     return 0
