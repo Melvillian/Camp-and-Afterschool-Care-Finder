@@ -88,6 +88,12 @@ def main():
             check("afterschool: two cards", dom.count('class="program-card') == 2)
             dom = dump_dom("index.html")
             check("camps: count line", "of <strong>4</strong> camps" in dom)
+            check("xss: no injected img element", '<img src="x"' not in dom)
+            check("xss: title untouched", "<title>Summer Camps" in dom)
+            check("xss: name shown as text", "&lt;img src=x" in dom)
+            check("xss: description shown as text", "&lt;b&gt;bold&lt;/b&gt;" in dom)
+            check("unsafe url: no javascript link", 'href="javascript:' not in dom)
+            check("safe url: link kept", 'href="https://example.org/camp"' in dom)
         finally:
             server.shutdown()
 

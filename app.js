@@ -592,12 +592,13 @@ function renderCards(programs) {
           return `<span class="reg-opens-badge">Reg opens ${MONTH_ABBR[next.getMonth()]} ${next.getDate()}</span>`;
         })();
 
-    const subjectTags = (p.subjects || []).slice(0, 3).map(s => `<span class="tag">${s}</span>`).join('');
+    const subjectTags = (p.subjects || []).slice(0, 3).map(s => `<span class="tag">${CampLib.escapeHtml(s)}</span>`).join('');
     const locationText = [p.city, p.state].filter(Boolean).join(', ') || 'Vermont';
     const gradesText = (p.gradesMin && p.gradesMax)
       ? `Grades ${p.gradesMin}-${p.gradesMax}`
       : (p.ageMin !== null && p.ageMax !== null ? `Ages ${p.ageMin}-${p.ageMax}` : '');
 
+    const site = CampLib.safeUrl(p.website);
     const weekBadgeHtml = p.startDate
       ? `<span class="week-badge">${fmtWeekRange(p.startDate, p.endDate)}</span>`
       : '';
@@ -610,31 +611,31 @@ function renderCards(programs) {
     card.innerHTML = `
       <div class="card-header">
         <div class="card-header-top">
-          <span class="card-type-badge ${badgeClass}">${p.type}</span>
+          <span class="card-type-badge ${badgeClass}">${CampLib.escapeHtml(p.type)}</span>
           ${yearChipHtml}${weekBadgeHtml}
         </div>
-        <div class="card-title">${p.name}</div>
-        <div class="card-org">${p.organization || ''}</div>
+        <div class="card-title">${CampLib.escapeHtml(p.name)}</div>
+        <div class="card-org">${CampLib.escapeHtml(p.organization)}</div>
       </div>
       <div class="card-body">
-        <p class="card-description">${p.description || ''}</p>
+        <p class="card-description">${CampLib.escapeHtml(p.description)}</p>
         <div class="card-meta">
-          <div class="meta-item"><span class="meta-icon">📍</span><span class="meta-value">${locationText}</span></div>
-          ${p.county ? `<div class="meta-item"><span class="meta-icon">🧭</span><span class="meta-value">${p.county} County</span></div>` : ''}
-          ${gradesText ? `<div class="meta-item"><span class="meta-icon">🎓</span><span class="meta-value">${gradesText}</span></div>` : ''}
-          ${p.hours ? `<div class="meta-item"><span class="meta-icon">🕐</span><span class="meta-value">${p.hours}</span></div>` : ''}
+          <div class="meta-item"><span class="meta-icon">📍</span><span class="meta-value">${CampLib.escapeHtml(locationText)}</span></div>
+          ${p.county ? `<div class="meta-item"><span class="meta-icon">🧭</span><span class="meta-value">${CampLib.escapeHtml(p.county)} County</span></div>` : ''}
+          ${gradesText ? `<div class="meta-item"><span class="meta-icon">🎓</span><span class="meta-value">${CampLib.escapeHtml(gradesText)}</span></div>` : ''}
+          ${p.hours ? `<div class="meta-item"><span class="meta-icon">🕐</span><span class="meta-value">${CampLib.escapeHtml(p.hours)}</span></div>` : ''}
           <div class="meta-item"><span class="meta-icon">💰</span><span class="meta-value">${costDisplay} ${scholarshipHtml}</span></div>
-          ${p.starsLevel ? `<div class="meta-item"><span class="meta-icon">⭐</span><span class="meta-value">${p.starsLevel}</span></div>` : ''}
+          ${p.starsLevel ? `<div class="meta-item"><span class="meta-icon">⭐</span><span class="meta-value">${CampLib.escapeHtml(p.starsLevel)}</span></div>` : ''}
         </div>
         <div class="tags">${subjectTags}</div>
       </div>
       <div class="card-footer">
         <label class="card-export-label">
-          <input type="checkbox" class="card-export-checkbox" data-uid="${p.uid}" ${exportSel ? 'checked' : ''} aria-label="Save program for export" />
+          <input type="checkbox" class="card-export-checkbox" data-uid="${CampLib.escapeHtml(p.uid)}" ${exportSel ? 'checked' : ''} aria-label="Save program for export" />
           <span>Save for export</span>
         </label>
-        <button type="button" class="btn-details" data-id="${p.uid}">View Details</button>
-        ${p.website ? `<a class="btn-website" href="${p.website}" target="_blank" rel="noopener noreferrer">Visit Website</a>` : ''}
+        <button type="button" class="btn-details" data-id="${CampLib.escapeHtml(p.uid)}">View Details</button>
+        ${site ? `<a class="btn-website" href="${CampLib.escapeHtml(site)}" target="_blank" rel="noopener noreferrer">Visit Website</a>` : ''}
         ${registrationHtml}
       </div>
     `;
@@ -713,7 +714,7 @@ function renderCalendar(programs) {
     html += `<div class="cal-day-num">${day}</div>`;
     dayProgs.slice(0, 3).forEach(p => {
       const label = p.name.length > 22 ? `${p.name.slice(0, 22)}...` : p.name;
-      html += `<button class="cal-camp-badge" data-id="${p.uid}" title="${p.name}">${label}</button>`;
+      html += `<button class="cal-camp-badge" data-id="${CampLib.escapeHtml(p.uid)}" title="${CampLib.escapeHtml(p.name)}">${CampLib.escapeHtml(label)}</button>`;
     });
     if (dayProgs.length > 3) html += `<span class="cal-more">+${dayProgs.length - 3} more</span>`;
     html += '</div>';
@@ -801,11 +802,11 @@ function renderMap(programs) {
       weight: 2
     });
 
-    const list = progs.slice(0, 8).map(p => `<li><a href="#" data-id="${p.uid}" style="color:#2a7d4f;font-weight:600;">${p.name}</a></li>`).join('');
+    const list = progs.slice(0, 8).map(p => `<li><a href="#" data-id="${CampLib.escapeHtml(p.uid)}" style="color:#2a7d4f;font-weight:600;">${CampLib.escapeHtml(p.name)}</a></li>`).join('');
     const more = progs.length > 8 ? `<li style="color:#6c757d;font-size:0.8rem;">+${progs.length - 8} more...</li>` : '';
 
     marker.bindPopup(`
-      <strong style="font-size:0.95rem;">${city}</strong>
+      <strong style="font-size:0.95rem;">${CampLib.escapeHtml(city)}</strong>
       <span style="color:#6c757d;font-size:0.8rem;"> - ${progs.length} result${progs.length !== 1 ? 's' : ''}</span>
       <ul style="margin:0.4rem 0 0;padding-left:1rem;font-size:0.85rem;">${list}${more}</ul>
     `);
@@ -908,12 +909,13 @@ function openModal(p) {
 
   const tagsContainer = document.getElementById('modalSubjects');
   tagsContainer.innerHTML = (p.subjects || []).length
-    ? p.subjects.map(s => `<span class="tag">${s}</span>`).join('')
+    ? p.subjects.map(s => `<span class="tag">${CampLib.escapeHtml(s)}</span>`).join('')
     : '<span style="color:var(--gray-600);font-size:0.85rem;">No tags available</span>';
 
   const websiteLink = document.getElementById('modalWebsiteLink');
-  if (p.website) {
-    websiteLink.href = p.website;
+  const site = CampLib.safeUrl(p.website);
+  if (site) {
+    websiteLink.href = site;
     websiteLink.style.display = '';
   } else {
     websiteLink.style.display = 'none';
@@ -935,9 +937,9 @@ function openModal(p) {
       const org = orgMap.get(p.orgId);
       const orgLabel = org ? org.name : (p.orgName || 'this organization');
       orgSection.innerHTML = `
-        <h4 class="modal-org-heading">More from ${orgLabel}</h4>
+        <h4 class="modal-org-heading">More from ${CampLib.escapeHtml(orgLabel)}</h4>
         <ul class="modal-org-list">
-          ${siblings.slice(0, 6).map(q => `<li><button class="modal-org-link" data-uid="${q.uid}">${q.name}</button></li>`).join('')}
+          ${siblings.slice(0, 6).map(q => `<li><button class="modal-org-link" data-uid="${CampLib.escapeHtml(q.uid)}">${CampLib.escapeHtml(q.name)}</button></li>`).join('')}
           ${siblings.length > 6 ? `<li class="modal-org-more">+${siblings.length - 6} more</li>` : ''}
         </ul>`;
       orgSection.querySelectorAll('.modal-org-link').forEach(btn => {
