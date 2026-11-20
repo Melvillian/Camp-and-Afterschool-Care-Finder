@@ -16,12 +16,15 @@ class Seeding(unittest.TestCase):
         self.assertEqual(s.guess_kind("https://x.org/camp.PDF"), "pdf")
         self.assertEqual(s.guess_kind("https://secure.rec1.com/VT/burlington-vt/catalog"), "rec1")
         self.assertEqual(s.guess_kind("https://summerbtvparks.com/"), "rec1")
+        self.assertEqual(s.guess_kind("https://www.summerbtvparks.com/"), "rec1")
         self.assertEqual(s.guess_kind(""), "manual")
         self.assertEqual(s.guess_kind("https://x.org/camps"), "html")
 
     def test_names_ai_crawler(self):
         self.assertTrue(s.names_ai_crawler("User-agent: GPTBot\nDisallow: /\n"))
         self.assertTrue(s.names_ai_crawler("user-agent:  claudebot\nDisallow: /"))
+        self.assertTrue(s.names_ai_crawler("User-agent: GPTBot # note\nDisallow: /"))
+        self.assertFalse(s.names_ai_crawler("# User-agent: GPTBot\nUser-agent: *"))
         self.assertFalse(s.names_ai_crawler("User-agent: *\nCrawl-delay: 10\n"))
         self.assertFalse(s.names_ai_crawler(""))
 

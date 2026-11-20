@@ -89,7 +89,8 @@ def guess_kind(url: str) -> str:
     parsed = urlparse(url)
     if parsed.path.lower().endswith(".pdf"):
         return "pdf"
-    if (parsed.hostname or "") in ("secure.rec1.com", "summerbtvparks.com"):
+    host = (parsed.hostname or "").removeprefix("www.")
+    if host in ("secure.rec1.com", "summerbtvparks.com"):
         return "rec1"
     return "html"
 
@@ -97,7 +98,7 @@ def guess_kind(url: str) -> str:
 def names_ai_crawler(robots_txt: str) -> bool:
     """True when any User-agent line names a known AI crawler."""
     for line in robots_txt.splitlines():
-        key, _, value = line.partition(":")
+        key, _, value = line.split("#", 1)[0].partition(":")
         if key.strip().lower() == "user-agent" and value.strip().lower() in AI_CRAWLERS:
             return True
     return False
