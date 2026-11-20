@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear } = require('../../lib.js');
+const { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus } = require('../../lib.js');
 
 test('escapeHtml escapes markup characters', () => {
   assert.equal(escapeHtml(`<img src=x onerror="a('b')">&`),
@@ -74,4 +74,25 @@ test('lastSeasonYear is null when nothing is last season', () => {
   const programs = [P('b2', 'B', '2027', '2027-07-05', '2027-07-09')];
   assert.equal(lastSeasonYear(programs, defaultVisibility(programs, T)), null);
   assert.equal(lastSeasonYear([], new Map()), null);
+});
+
+test('localEditsStatus: nothing saved', () => {
+  const s = localEditsStatus({ programs: null, orgs: null, stamp: null, savedAt: null }, 'A');
+  assert.deepEqual([s.useLocal, s.stale], [false, false]);
+});
+test('localEditsStatus: saved against the current build', () => {
+  const s = localEditsStatus({ programs: '[{"uid":"x"}]', orgs: '[]', stamp: 'A', savedAt: '2026-11-20T09:00:00' }, 'A');
+  assert.deepEqual([s.useLocal, s.stale], [true, false]);
+  assert.deepEqual(s.programs, [{ uid: 'x' }]);
+});
+test('localEditsStatus: saved against an older build is stale', () => {
+  const s = localEditsStatus({ programs: '[]', orgs: '[]', stamp: 'A', savedAt: 'x' }, 'B');
+  assert.deepEqual([s.useLocal, s.stale], [true, true]);
+});
+test('localEditsStatus: copies from before stamping are stale', () => {
+  assert.equal(localEditsStatus({ programs: '[]', orgs: null, stamp: null, savedAt: null }, 'B').stale, true);
+});
+test('localEditsStatus: corrupt JSON is ignored', () => {
+  const s = localEditsStatus({ programs: '{not json', orgs: '"a string"', stamp: 'A', savedAt: 'x' }, 'A');
+  assert.deepEqual([s.useLocal, s.programs, s.orgs], [false, null, null]);
 });

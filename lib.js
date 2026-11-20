@@ -81,5 +81,29 @@
     return best ? String(best) : null;
   }
 
-  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear };
+  function parseArray(text) {
+    if (typeof text !== 'string') return null;
+    try {
+      const v = JSON.parse(text);
+      return Array.isArray(v) ? v : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Decide whether the admin page should use browser-saved edits instead of data.js.
+  function localEditsStatus(saved, currentStamp) {
+    const programs = parseArray(saved.programs);
+    const orgs = parseArray(saved.orgs);
+    const useLocal = programs !== null || orgs !== null;
+    return {
+      useLocal,
+      stale: useLocal && saved.stamp !== currentStamp,
+      programs,
+      orgs,
+      savedAt: saved.savedAt || null,
+    };
+  }
+
+  return { escapeHtml, safeUrl, formatAddress, isPast, defaultVisibility, lastSeasonYear, localEditsStatus };
 });

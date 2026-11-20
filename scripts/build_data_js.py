@@ -431,7 +431,8 @@ def main():
         f" | Camps: {len(camps)} | Afterschool: {len(afterschool)}\n\n"
         f"const PROGRAMS = {programs_js};\n\n"
         f"const ORGANIZATIONS = {orgs_js};\n\n"
-        f"const TOWN_COORDS = {json.dumps(town_coords, indent=2, ensure_ascii=False)};\n"
+        f"const TOWN_COORDS = {json.dumps(town_coords, indent=2, ensure_ascii=False)};\n\n"
+        f'const DATA_GENERATED = "{now_str}";\n'
     )
     OUT_PATH.write_text(output, encoding="utf-8")
 
