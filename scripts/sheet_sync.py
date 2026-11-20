@@ -369,14 +369,17 @@ def task_id(org_id: str, kind: str, season: int, number: int = 1) -> str:
     return base if number <= 1 else f"{base}-{number}"
 
 
-def _next_task_id(org_id: str, kind: str, season: int, snapshot: list[dict]) -> str | None:
-    """The id for a new task, or None when one is already in the Sheet (or an earlier one is still open)."""
+def _next_task_id(org_id: str, kind: str, season: int, snapshot: list[dict], rejected=frozenset()) -> str | None:
+    """The id for a new task, or None when one is already in the Sheet (or an earlier one is still open).
+
+    A task that is done but was rejected on the last pull (in `rejected`) does not count as done.
+    """
     base = task_id(org_id, kind, season)
     pattern = re.compile(re.escape(base) + r"(?:-(\d+))?")
     same = [(int(m.group(1) or 1), t) for t in snapshot if (m := pattern.fullmatch(t.get("task_id", "")))]
     if not same:
         return base
-    if kind not in REPEATABLE or any(t.get("status") != "done" for _, t in same):
+    if kind not in REPEATABLE or any(t.get("status") != "done" or t.get("task_id") in rejected for _, t in same):
         return None
     return task_id(org_id, kind, season, max(n for n, _ in same) + 1)
 
@@ -404,6 +407,7 @@ def plan_push(sources_rows, orgs: dict[str, dict], staged: dict[str, list[dict]]
               season: int, today: str, needs_help=()) -> PushPlan:
     """What to add to the Sheet and which cells to change. Reads nothing and writes nothing."""
     plan = PushPlan()
+    rejected = {tid for tid, _ in needs_help}
     for src in sources_rows:
         org = src["org_id"]
         rows = staged.get(org, [])
@@ -411,7 +415,7 @@ def plan_push(sources_rows, orgs: dict[str, dict], staged: dict[str, list[dict]]
         if not need:
             continue
         kind, minutes = need
-        tid = _next_task_id(org, kind, season, snapshot_tasks)
+        tid = _next_task_id(org, kind, season, snapshot_tasks, rejected)
         if tid is None:
             continue
         org_row = orgs.get(org, {})
@@ -504,7 +508,13 @@ def push(root: Path = ROOT, today: str | None = None) -> int:
         if src["status_2027"] == "changed" and live.get(src["org_id"]):
             staged[src["org_id"]] = live[src["org_id"]]
 
-    snapshot = _previous(folder, "tasks", TASK_COLUMNS, "Tasks")
+    snapshot = []
+    if (folder / "tasks.csv").exists():  # a missing snapshot is empty; an unreadable one must not re-offer every task
+        try:
+            snapshot = parse_tab((folder / "tasks.csv").read_text(encoding="utf-8"), TASK_COLUMNS, "Tasks")
+        except SheetError as exc:
+            print(f"the saved Tasks snapshot cannot be read, so nothing was written: {exc}")
+            return 1
     plan = plan_push(source_rows, orgs, staged, snapshot, season, today,
                      needs_help=_read_needs_help_pairs(folder / NEEDS_HELP_FILE))
 

@@ -106,6 +106,14 @@ class Plan(unittest.TestCase):
         plan = ss.plan_push([SRC(status_2027="extracted")], ORGS, {"o1": [{"program_id": "a"}]}, done, 2027, "x")
         self.assertEqual(plan.new_tasks, [])
 
+    def test_rejected_done_task_does_not_spawn_a_repeat(self):
+        src = [SRC(status_2027="changed")]
+        snap = [{"task_id": "2027-o1-check_changes", "status": "done"}]
+        plan = ss.plan_push(src, ORGS, {}, snap, 2027, "2026-12-20",
+                            needs_help=[("2027-o1-check_changes", "row 1: bad date")])
+        self.assertEqual(plan.new_tasks, [])
+        self.assertEqual([(c[1], c[2]) for c in plan.cell_changes][0], ("status", "needs_help"))
+
     def test_needs_help_changes(self):
         snap = [{"task_id": "t1", "status": "done"}, {"task_id": "t2", "status": "needs_help"},
                 {"task_id": "t3", "status": "done"}]
@@ -237,6 +245,32 @@ class Commands(unittest.TestCase):
         self.assertEqual(lines[0], "Tasks row 3 (2027-beta-find_page): set status to open — claim from 2026-12-10 expired")
         self.assertIn("Tasks row 4 (2027-gamma-check_changes): set status to needs_help", lines[2])
         self.assertIn("Cell changes: 4", out)
+
+    def test_changed_org_uses_programs_rows_over_leftover_staging(self):
+        staging.save("gamma", 2027, [{**dict.fromkeys(staging.STAGING_COLUMNS, ""), "program_id": "gamma-leftover-2027",
+                                      "org_id": "gamma", "program_name": "Leftover"}], root=self.root)
+        self.run_main("push")
+        ids = [r[1] for r in self.paste("_to_paste_drafts.csv") if r[0] == "2027-gamma-check_changes"]
+        self.assertEqual(ids, ["gamma-camp-2027"])  # inactive and 2026 rows are left out too
+
+    def test_changed_org_without_live_rows_falls_back_to_leftover_staging(self):
+        with open(self.root / "data" / "programs.csv", "w", newline="") as f:
+            csv.DictWriter(f, staging.PROGRAM_COLUMNS, lineterminator="\n").writeheader()
+        staging.save("gamma", 2027, [{**dict.fromkeys(staging.STAGING_COLUMNS, ""), "program_id": "gamma-leftover-2027",
+                                      "org_id": "gamma", "program_name": "Leftover"}], root=self.root)
+        self.run_main("push")
+        ids = [r[1] for r in self.paste("_to_paste_drafts.csv") if r[0] == "2027-gamma-check_changes"]
+        self.assertEqual(ids, ["gamma-leftover-2027"])
+
+    def test_unreadable_snapshot_stops_push_and_missing_one_is_empty(self):
+        self.sheet.mkdir(parents=True)
+        (self.sheet / "tasks.csv").write_text("task_id,status\nt1,open\n", encoding="utf-8")  # columns missing
+        code, out = self.run_main("push")
+        self.assertEqual(code, 1)
+        self.assertIn("Tasks", out)
+        self.assertFalse((self.sheet / "_to_paste_tasks.csv").exists())
+        (self.sheet / "tasks.csv").unlink()
+        self.assertEqual(self.run_main("push")[0], 0)
 
     def test_init_writes_headers_how_to_and_steps(self):
         code, out = self.run_main("init")
