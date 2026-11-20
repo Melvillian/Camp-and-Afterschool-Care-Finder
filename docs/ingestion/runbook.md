@@ -9,17 +9,17 @@ The design and the reasons behind it are in `docs/superpowers/specs/2026-11-20-2
 - **`data/sources.csv`**: one row per organization. It holds the page to watch, how to read it (`kind`), and where it stands (`status_2027`).
 - **The Google Sheet**: where volunteers check drafts and type in camps. Four tabs: Tasks, Drafts, Orgs, How to. Sheet id and the Tasks tab's `gid` are in `data/ingest_config.json`.
 - **`data/staging/2027/`**: draft rows waiting for review, one file per organization, plus `_organizations.csv` for organization facts.
-- **`data/staging/2027/sheet/`**: the saved copy of the Sheet from each pull, and the files `push` makes for you to paste.
+- **`data/staging/2027/sheet/`**: what each pull saves of the Sheet, and the files `push` makes for you to paste. Its `private/` folder holds the tabs exactly as downloaded, with volunteers' names and notes; it is git-ignored and stays on your machine (see 1.1).
 - **`data/programs.csv` and `data/organizations.csv`**: the live data. Only `merge_staging.py` writes 2027 rows into them.
 
 How `status_2027` moves:
 
 | Status | Meaning | What moves it on |
 |---|---|---|
-| `not_posted` | Nothing for 2027 on the page yet | `watch_sources.py` sets `posted` when the page mentions 2027. For `rec1`, `gated` and `manual` sources you set it by hand (see below). |
+| `not_posted` | Nothing for 2027 on the page yet | `watch_sources.py` sets `posted` when the page mentions 2027 and its text is new since the last check (an unchanged page is not flagged again). For `rec1`, `gated` and `manual` sources you set it by hand (see below). |
 | `posted` | 2027 is up; no rows yet | The extraction skill sets `extracted`. `enter_new` tasks (hand entry) are made for sources Claude may not read. |
 | `extracted` | Draft rows are in staging | A volunteer checks them; `merge_staging.py` sets `merged`. |
-| `merged` | Rows are live | `watch_sources.py` sets `changed` if the page text changes later. |
+| `merged` | Rows are live | `watch_sources.py` sets `changed` if the page text changes later. Merge also marks the staging file's rows `review = merged`, so the same file is never merged twice. |
 | `changed` | A live page changed | A volunteer updates the rows; merge sets `merged` again. |
 | `not_running` | The camp is not running | You set it by hand. |
 
@@ -44,23 +44,25 @@ It downloads the Tasks, Drafts and Orgs tabs, takes about four seconds (it waits
 - one line per task that changed, such as `2027-some-camp-check_draft: claimed -> done`, or `no task changes`;
 - `Drafts rows: N added, N removed, N edited`;
 - `staged N row(s) for <org_id>` for each task that was finished and passed the checks. Those rows are now in `data/staging/2027/<org_id>.csv`;
-- `page for <org_id>: <url>` when a volunteer finished a `find_page` task. The address is now in `sources.csv`;
+- `page for <org_id>: <old address> -> <new address>` when a volunteer finished a `find_page` task. The new address is now in `sources.csv`. When it is on a different site, the line ends `[new site: robots_ai_optout blanked, run sources.py robots]`: the old site's robots answer and page hash were cleared, so the source is hand-entry only until you ask the new site;
 - `WARNING ...` for Tasks rows it skipped (no `task_id`, a repeated `task_id`, an odd status or kind);
 - `NEEDS HELP <task_id>: <reason>` for finished tasks that failed the checks.
 
+**Check every `page for` line before the watch runs.** Anyone with the Sheet link can type an address, and the watch will fetch it from your machine. Pull already refuses addresses that are not `http(s)`, bare IP addresses, `localhost` and local names. It cannot tell whether a normal-looking site belongs to the organization. For each line, open the new address and make sure it is the organization's own site (or its town's or school's). If it is not, put the old address back in `sources.csv`. For each line marked `new site`, run `python3 scripts/sources.py robots` before step 1.4; it asks only the sites with a blank answer.
+
 If it cannot read the Sheet it prints why and exits 1 without writing anything. The usual cause is that the Sheet is no longer shared so anyone with the link can view it (see parts 3 and 6).
 
-**Rejected tasks.** A finished task whose rows fail the checks (a blank `review`, a bad date, a wrong `org_id`) is not staged. It goes into `data/staging/2027/sheet/_needs_help.csv` with the reason. On the next `push`, the task's `status` is set back to `needs_help` and the reason is put in its `volunteer_notes`. That is how the volunteer finds out. The change shows up as a `set status to needs_help` line in `_changes.txt` (see step 1.6). You do not need to do anything with these except paste the change.
+**Rejected tasks.** A finished task whose rows fail the checks (a blank `review`, a bad date, a wrong `org_id`, a `row_id` that is not one of the organization's current rows, a cell starting with `=`, a find_page address that is not a public site) is not staged. It goes into `data/staging/2027/sheet/private/_needs_help.csv` with the reason. On the next `push`, the task's `status` is set back to `needs_help` and the reason is put in its `volunteer_notes`. That is how the volunteer finds out. The change shows up as a `set status to needs_help` line in `_changes.txt` (see step 1.6). You do not need to do anything with these except paste the change.
 
 **First real pull: check the Sheet's data before you trust it.** The pull code was tested only on made-up CSV, never on an actual Sheet. Google's CSV export guesses each column's type. When a cell does not match the rest of its column it may blank the cell, rewrite a date (`2027-07-05` as `7/5/2027`), or treat a blank row in a way the code does not expect. Setting every tab to Plain text (part 3) should prevent this, but nobody has confirmed it yet. On your first pull with real volunteer data:
 
-1. Open `data/staging/2027/sheet/tasks.csv` and `drafts.csv` (the snapshot the pull just wrote).
+1. Open `data/staging/2027/sheet/private/tasks.csv` and `private/drafts.csv` (the tabs exactly as the pull downloaded them).
 2. Open the same rows in the Sheet. Compare five or six rows, including at least one with a date, one with a time, and one with an empty cell in the middle of the row.
 3. If they match, carry on. If a value is blank, reformatted, or missing, **stop and do not merge.** Check that the tab is set to Plain text, fix it, run `pull` again, and compare again. If it still differs, open an issue and do not merge anything until it is understood.
 
 Do this check again if you ever add a column or change the tab format.
 
-The snapshot files under `data/staging/2027/sheet/` (`tasks.csv`, `drafts.csv`, `orgs.csv`, `snapshot.json`, `_needs_help.csv`) are committed. They are your backup of the Sheet (part 5). Three kinds of generated file are git-ignored and you do not commit them: `_to_paste_*.csv`, `_changes.txt`, and the `_init/` folder.
+**What is committed, and what stays on your machine.** Only two pull files are committed: `data/staging/2027/sheet/tasks.csv` and `snapshot.json` (the date). That `tasks.csv` is a redacted copy of the Tasks tab: `claimed_by`, `claimed_on` and `volunteer_notes` are blank, and `org_name` comes from `organizations.csv`, not from the Sheet. The Volunteer page reads it when the live Sheet cannot be reached. Everything else the pull keeps is in `data/staging/2027/sheet/private/`: the Tasks, Drafts and Orgs tabs exactly as downloaded, and `_needs_help.csv`. That folder is git-ignored, so volunteers' names, their notes and anything unreviewed typed into the Sheet never reach the public repo. It exists only on the machine that ran `pull`; `push` needs it, so on another machine run `pull` before `push`. Also git-ignored: `_to_paste_*.csv`, `_changes.txt`, and the `_init/` folder.
 
 ### 1.2 Look over each ready staging file
 
@@ -70,13 +72,19 @@ This is the last check before anything reaches the site. Volunteers and Claude b
 ls data/staging/2027/
 ```
 
-Every `<org_id>.csv` there that is not already `merged` is a candidate. (`_organizations.csv` and the `sheet/` folder in that listing are not organization files; skip them.) For each one, open it and look at:
+Every `<org_id>.csv` there whose `review` column does not say `merged` is a candidate (merge writes `merged` into a file once it is live; a finished task on the next pull replaces the file). The `sheet/` folder is not an organization file. For each candidate, open it and look at:
 
 - **`source_quote` against the dates.** The quote is the sentence the row came from. Do the `start_date` and `end_date`, the price and the ages agree with it? Is any date in the wrong year?
 - **Any row marked `delete`** in the `review` column. Make sure that camp really is gone. A `delete` sets the live row to `inactive`.
 - **Rows with many blank cells.** A blank means "the page did not say", which is fine, but a row that is mostly blank may be a stub someone half-finished.
 - **Rows with `review` blank.** Merge will skip the whole organization until every row has `ok`, `fixed` or `delete`.
 - A sample of **prices and ages**. A typo here is the mistake nobody notices.
+- **`registration_url`**: is it on the organization's own site (or its registration provider)? A link to an unrelated host is the easiest way to send families somewhere bad.
+- **`program_id`s that do not end in `-2027`** (or `-2027-2` and so on). Merge refuses to change a row of another season, but an odd id still means someone typed it.
+
+Then open **`data/staging/2027/_organizations.csv`** and read the row of every organization you are about to merge: `registration_opens`, `registration_opens_early`, `registration_notes`, financial aid and `website`. These go straight onto the site (the "Registration opening soon" list and the organization's links). Check the dates against the page, the website is the organization's own, and the notes are plain facts, not a phone number or a link you would not give a parent. Merge checks the dates are real and in 2026 or 2027 and the website is `http(s)`, and prints each change, but it cannot judge the words.
+
+**To hold a file back for a week**, blank one `review` cell in it. `--all-ready` merges every reviewed file it finds, so a file you are unsure of must not be left fully reviewed.
 
 You can open the page behind a row with its `source_url`. For anything odd, fix the cell in the staging file, or set `review` to `delete`, then check it:
 
@@ -92,7 +100,7 @@ It prints the problems, or nothing wrong. An edit you make here is not copied ba
 python3 scripts/merge_staging.py --all-ready
 ```
 
-It merges every staging file that is not already `merged` and passes its checks. It prints `skipped <org_id>: not ready (<reason>)` for the others, and `merged a, b: N added, N updated, N retired` at the end. Or `nothing ready to merge`.
+It merges every staging file that passes its checks and is not already merged (its organization is not `merged` in `sources.csv`, and its rows do not say `review = merged`). It prints `skipped <org_id>: not ready (<reason>)` for the others, one line per organization field it changed (`<org_id> registration_opens: '' -> '2027-02-04'`, and a `WARNING` when a website moves to another site), and `merged a, b: N added, N updated, N retired` at the end. Or `nothing ready to merge`.
 
 To merge only some:
 
@@ -102,9 +110,9 @@ python3 scripts/merge_staging.py --org <org_id> --org <other_org_id>
 
 With `--org`, if any one of them is not ready, it refuses all of them and writes nothing.
 
-Merge also copies the organization facts (`registration_opens` and so on) for each organization it merges, runs `validate_data.py` and `build_data_js.py`, and sets those organizations to `merged` in `sources.csv`.
+Merge also copies the organization facts (`registration_opens` and so on) for each organization it merges, runs `validate_data.py` and `build_data_js.py`, and sets those organizations to `merged` in `sources.csv`. Every merged row gets `program_year` 2027 and `confidence` `confirmed`. Afterwards it marks each merged staging file's rows `review = merged` and removes those organizations' rows from `_organizations.csv`, so a later merge never re-applies old facts over a correction. It refuses an organization whose staging file would change a row of another season.
 
-**If it fails.** The message says `validation failed` or `build failed`, and it exits 1. It has already put `programs.csv` and `organizations.csv` back as they were, and left `sources.csv` alone, so nothing is half-done. The message lists `organizations whose rows may have caused it`, followed by the validator's output. Then:
+**If it fails.** The message says `validation failed` or `build failed`, and it exits 1. It has already put `programs.csv` and `organizations.csv` back as they were, and left `sources.csv` and the staging files alone, so nothing is half-done. The message lists `organizations whose rows may have caused it`, followed by the validator's output. Then:
 
 1. Read the validator's message. It names a row and a column.
 2. Fix that cell in the staging file for the organization named (or set that row's `review` to `delete`).
@@ -112,6 +120,18 @@ Merge also copies the organization facts (`registration_opens` and so on) for ea
 4. If you cannot fix it quickly, merge the others with `--org` and leave that one for next week.
 
 `git diff data/` after a successful merge shows exactly what changed.
+
+**Organization facts on their own.** Most organizations announce when registration opens before they post sessions. To put a date on the site before there are any rows to merge:
+
+1. Stage it: write the facts to a JSON file (for example `{"registration_opens": "2027-02-04", "registration_notes": "Members from Jan 28"}`) and run `python3 scripts/staging.py add-org --org <org_id> --json FILE`. A volunteer's finished task with only an Orgs row stages its facts the same way, and `push` lists such organizations as `Waiting, no task: <org_id>: organization facts staged with no rows to merge`.
+2. Look at that organization's row in `data/staging/2027/_organizations.csv` against the organization's page, as in 1.2.
+3. Apply it:
+
+   ```
+   python3 scripts/merge_staging.py --org-facts <org_id> [--org-facts <other_org_id>]
+   ```
+
+   It runs the same checks, prints each field it changes (old -> new), validates, builds, puts `organizations.csv` back if either fails, and removes the applied rows from `_organizations.csv`. It does not touch `programs.csv` or `sources.csv`.
 
 ### 1.4 Watch the sources
 
@@ -121,7 +141,7 @@ python3 scripts/watch_sources.py
 
 It fetches each `html` and `pdf` source that has not been checked in the last 6 days, one request every two seconds, so a full run takes several minutes. It prints:
 
-- `POSTED: <org_id>`: a `not_posted` page now mentions 2027. Extract it (step 1.5).
+- `POSTED: <org_id>`: a `not_posted` page now mentions 2027, and its text changed since the last check. Extract it (step 1.5). If the skill finds no sessions it sets `not_posted` again, and the same unchanged page is not flagged next week.
 - `CHANGED: <org_id>`: a `merged` page's text changed. The next `push` makes a `check_changes` task.
 - `NEEDS A PERSON: <org_id> (<url>) <reason>`: the page failed to load or redirected to another site. A note `fetch failed <date>` is written in `sources.csv`, and the next `push` makes a `find_page` task for it.
 - a last line: `checked N, N news, N need a person, N skipped (no checkable page), N checked recently`.
@@ -148,13 +168,19 @@ In Claude Code, from the repo root, ask:
 - It writes draft rows to `data/staging/2027/<org_id>.csv`, writes the organization's registration dates to `_organizations.csv`, and sets `status_2027` to `extracted`.
 - It reports, for each organization, how many rows it drafted and what to look at first.
 
-**Sources Claude may not read.** If `robots_ai_optout` is anything but exactly `FALSE`, the skill never fetches the site. When that source is `posted`, `push` makes an `enter_new` task, and a volunteer types the rows in. `TRUE` means the site's `robots.txt` names an AI crawler. A **blank** value means the check could not reach the site. To ask again for the blank ones only:
+**Sources Claude may not read.** If `robots_ai_optout` is anything but exactly `FALSE`, the skill never fetches the site. When that source is `posted`, `push` makes an `enter_new` task, and a volunteer types the rows in. `TRUE` means the site's `robots.txt` names an AI crawler (GPTBot, ChatGPT-User, OAI-SearchBot, ClaudeBot, Claude-Web, Claude-User, anthropic-ai, CCBot, Google-Extended, PerplexityBot, Bytespider, Amazonbot, Applebot-Extended, meta-externalagent) or turns every crawler away (`User-agent: *` with `Disallow: /`). A **blank** value means the check could not reach the site, or the page address moved to a new site. To ask again for the blank ones only:
 
 ```
 python3 scripts/sources.py robots
 ```
 
-It checks one host at a time, two seconds apart, leaves `TRUE` and `FALSE` rows alone, and prints a count such as `12 hosts: 3 name AI crawlers, 1 failed`. A host that still failed stays blank, and is treated as off limits.
+It checks one host at a time, two seconds apart, leaves `TRUE` and `FALSE` rows alone, and prints a count such as `12 hosts: 3 turn AI crawlers away, 1 failed`. A host that still failed stays blank, and is treated as off limits.
+
+Sites change their `robots.txt`. Once a season, before the first extraction run, ask every host again (about six minutes):
+
+```
+python3 scripts/sources.py robots --recheck
+```
 
 After the skill finishes, look at a couple of the files it made. Do not merge them yet: volunteers check them first.
 
@@ -183,7 +209,12 @@ It does not touch the Sheet; nothing can write to the Sheet yet. You put the row
 
 **Do not copy the file's text and paste it.** Pasting CSV text puts every line into one cell instead of splitting it into columns. The files have no header row; they are meant to be appended under the existing headers.
 
-Then apply `_changes.txt`. It holds one line per cell to change on the Tasks tab, each naming the row, the `task_id`, and the reason, such as `Tasks row 14 (2027-some-camp-check_draft): set status to needs_help — its rows did not pass the checks on the last pull`. Two kinds of change appear: a rejected task goes to `needs_help` with the reason in `volunteer_notes`; a claim over three days old goes back to `open` and loses its `claimed_by`. Edit those cells by hand. If the file is empty, there is nothing to do.
+Then apply `_changes.txt`. It holds one line per cell to change on the Tasks tab, each naming the row (its real row number in the Sheet, blank rows counted), the `task_id`, and the reason, such as `Tasks row 14 (2027-some-camp-check_draft): set status to needs_help — its rows did not pass the checks on the last pull`. Two kinds of change appear: a rejected task goes to `needs_help` with the reason in `volunteer_notes`; a claim over three days old goes back to `open` and loses its `claimed_by`. Edit those cells by hand. If the file is empty, there is nothing to do.
+
+`push` may also print:
+
+- `Claimed with no readable claimed_on, so never released: Tasks row N (<task_id>)`. A claim with a blank or mistyped date is never given back automatically, and the Volunteer page hides claimed tasks. Ask the volunteer, or set the task back to `open` and clear `claimed_by` yourself.
+- `Waiting, no task: <org_id>: ...` for organizations that need you, not a volunteer: `posted` and waiting for the extraction skill (step 1.5); `extracted` with no staged rows (run the skill again, or set the status back); organization facts staged with no rows to merge (see "Organization facts on their own" in 1.3).
 
 ### 1.7 Test, commit, pull request
 
@@ -191,7 +222,7 @@ Then apply `_changes.txt`. It holds one line per cell to change on the Tasks tab
 node --test tests/js/ && python3 -m unittest discover -s tests/py -v && python3 scripts/smoke_test.py
 ```
 
-It should end with all three passing. (The smoke test needs Chrome.) From 2026-12-20 the Python suite fails on purpose until the Sheet is secured; see part 6. Then commit what changed under `data/` (the `sources.csv`, staging files, the snapshot in `data/staging/2027/sheet/`, `programs.csv`, `organizations.csv`) and `data.js`:
+It should end with all three passing. (The smoke test needs Chrome.) From 2026-12-20 the Python suite fails on purpose until the Sheet is secured; see part 6. Then commit what changed under `data/` (the `sources.csv`, staging files, `data/staging/2027/sheet/tasks.csv` and `snapshot.json`, `programs.csv`, `organizations.csv`) and `data.js`. The `sheet/private/` folder is git-ignored and stays out of the commit; check `git status` does not list it:
 
 ```
 git status
@@ -210,9 +241,10 @@ Merging to the fork's `main` publishes the site. Upstream is handled separately.
 ## 2. The weekly routine in short
 
 ```
-python3 scripts/sheet_sync.py pull            # read the volunteers' work; check the first real one against the Sheet
-# read each staging file (part 1.2)
+python3 scripts/sheet_sync.py pull            # read the volunteers' work; check each "page for" line
+# read each staging file and its _organizations.csv row (part 1.2)
 python3 scripts/merge_staging.py --all-ready
+python3 scripts/sources.py robots             # only if pull printed a "new site" line
 python3 scripts/watch_sources.py              # then check the rec1/gated/manual sites by hand
 # Claude Code: run the extract-camp-listings skill
 python3 scripts/sheet_sync.py push            # import the _to_paste files, apply _changes.txt
@@ -220,7 +252,7 @@ node --test tests/js/ && python3 -m unittest discover -s tests/py -v && python3 
 git add data data.js && git commit && gh pr create --repo Melvillian/Camp-and-Afterschool-Care-Finder --base main
 ```
 
-Timing, from the design: weekly runs from mid-December. Early January is when the lottery and early-registration camps announce, so read those first (`expected_open` in `sources.csv` is filled in for only 7 organizations so far; add more as registration dates become known). February to mid-March is the long tail of camps that post late.
+Timing, from the design: weekly runs from mid-December. Run `python3 scripts/sources.py robots --recheck` once before the first extraction run. Early January is when the lottery and early-registration camps announce, so read those first (`expected_open` in `sources.csv` is filled in for only 7 organizations so far; add more as registration dates become known). Many of them give the registration date before any sessions are posted: record it with `staging.py add-org`, look at the staged row, and apply it with `merge_staging.py --org-facts` (1.3, "Organization facts on their own"). February to mid-March is the long tail of camps that post late.
 
 ## 3. First-time Sheet setup
 
@@ -234,7 +266,7 @@ It writes four files to `data/staging/2027/sheet/_init/` (git-ignored): `tasks_h
 
 1. **Name the four tabs exactly**: `Tasks`, `Drafts`, `Orgs`, `How to`. The scripts and the site look the tabs up by these names.
 2. **Set every tab to Plain text before anything goes in.** In each tab, select all cells (click the grey square at the top left), then **Format, Number, Plain text**. Google's CSV export guesses column types and can blank cells or reformat dates. Plain text is what stops that. Do this first; changing the format afterwards does not repair values Google has already converted.
-3. **Put the header row in each tab.** The files are one-line CSV. Pasting that line puts all the headers in one cell. Use **File, Import, Upload** instead, with **Append to current sheet**, **Comma**, and "Convert text to numbers, dates and formulas" **off**, the same as in step 1.6: `tasks_header.csv` into Tasks, `drafts_header.csv` into Drafts, `orgs_header.csv` into Orgs. On an empty tab, append starts at row 1. Check each tab ends up with its headers across row 1, one per column. (`init` says "paste"; import is the way that splits the columns.)
+3. **Put the header row in each tab.** The files are one-line CSV. Pasting that line puts all the headers in one cell. Use **File, Import, Upload** instead, with **Append to current sheet**, **Comma**, and "Convert text to numbers, dates and formulas" **off**, the same as in step 1.6: `tasks_header.csv` into Tasks, `drafts_header.csv` into Drafts, `orgs_header.csv` into Orgs. On an empty tab, append starts at row 1. Check each tab ends up with its headers across row 1, one per column.
 4. **How to tab.** Open `how_to.txt`, copy it all, double-click cell A1 of the How to tab so the cell is in edit mode, and paste. If the text spreads over many rows instead, undo and try again from edit mode.
 5. Run `python3 scripts/sheet_sync.py push` and import the `_to_paste` files as in step 1.6. The first push on the real data makes 12 `find_page` tasks (one per source with no page or a broken one).
 6. **Share it.** For now, "Anyone with the link" is an editor. Part 6 says how to tighten that. The Sheet must always stay viewable by anyone with the link, or `pull` and the Volunteer page stop working.
@@ -251,30 +283,22 @@ It should print the new tasks, and `Drafts rows: 0 added, 0 removed, 0 edited`.
 ## 4. Known limits
 
 - A **duplicate `task_id`** in the Tasks tab (two rows with the same id) is skipped by the code (the later row), and the warning is printed on every pull until someone removes one of the rows.
-- **`_changes.txt` row numbers assume there are no blank rows between tasks** in the Tasks tab. The code counts rows from the saved snapshot, which drops blank rows. If a blank row gets in, the row number can be off. Each line also names the `task_id`, so search for that instead. Better, delete the blank row.
+- **`_changes.txt` row numbers come from the last pull.** Rows added, sorted or deleted in the Sheet since then shift them. Each line also names the `task_id`; if the row does not match, search for that instead.
+- **Page addresses are checked by name only.** Pull refuses bare IP addresses and local names, but it does not look a name up, so a public-looking name that points at a private address would get through. That is what the `page for` check in 1.1 is for.
 - A Sheet that is not viewable by "anyone with the link" makes `pull` fail with a message that it came back as a web page.
 - Anything you type into a staging file is not copied back to the Sheet, and the next `push` does not rewrite Drafts rows already pushed. The Sheet is the source until you merge.
 
 ## 5. Restoring a vandalised Sheet
 
-Every pull saves the Sheet into `data/staging/2027/sheet/` (`tasks.csv`, `drafts.csv`, `orgs.csv`, `snapshot.json` with the date). They are committed, so git has the history.
+**Do not pull first.** A pull would overwrite your private copy with the vandalised Sheet.
 
-1. Find the last good snapshot:
-   ```
-   git log --oneline -- data/staging/2027/sheet/tasks.csv
-   ```
-2. Check out those three files from that commit into a scratch folder, not over your working copy:
-   ```
-   git show <commit>:data/staging/2027/sheet/tasks.csv > /tmp/restore_tasks.csv
-   git show <commit>:data/staging/2027/sheet/drafts.csv > /tmp/restore_drafts.csv
-   git show <commit>:data/staging/2027/sheet/orgs.csv > /tmp/restore_orgs.csv
-   ```
-3. In the Sheet, try **File, Version history** first; Google may have a better copy than ours. If not, in each tab use **File, Import, Upload** with the matching restore file (it includes the header row), **Replace current sheet**, and "Convert text to numbers, dates and formulas" **off**. Then check the tab is still set to Plain text (part 3, step 2) and the headers are in row 1.
-4. Run `python3 scripts/sheet_sync.py pull` and check the printed changes are what you expect.
-5. If the vandal got to a staging file or the data before you merged, `git diff data/` shows it. Do not merge until it is clean.
-6. Lock the Sheet down (part 6) if you have not already.
+1. **Use Google's own copy first.** In the Sheet, **File, Version history, See version history**. Pick the last good version, check it, and **Restore this version**. It keeps work volunteers did up to that moment, which no copy of ours has. This is the way to restore in almost every case.
+2. **If Google's history does not help**, use the private copy from your last pull: `data/staging/2027/sheet/private/tasks.csv`, `drafts.csv` and `orgs.csv`. They are the tabs exactly as downloaded, header row included. They exist only on the machine that ran the pull and are not in git, so if you pull from more than one machine, use the one that pulled last. Copy them somewhere outside the repo first, then in each tab use **File, Import, Upload** with the matching file, **Replace current sheet**, and "Convert text to numbers, dates and formulas" **off**. Then check the tab is still set to Plain text (part 3, step 2) and the headers are in row 1.
+3. Run `python3 scripts/sheet_sync.py pull` and check the printed changes are what you expect.
+4. If the vandal got to a staging file or the data before you merged, `git diff data/` shows it. Do not merge until it is clean.
+5. Lock the Sheet down (part 6) if you have not already.
 
-Work a volunteer did since the snapshot is lost; the Sheet's own version history may have it. Tell volunteers to redo anything finished since.
+The committed `data/staging/2027/sheet/tasks.csv` is not a restore copy: it has no names, notes, drafts or Orgs rows. Its git history shows only which tasks existed and their status. Work a volunteer did since the copy you restored is lost; tell volunteers to redo anything finished since.
 
 ## 6. When the reminder test fails
 
