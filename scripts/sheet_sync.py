@@ -1,6 +1,9 @@
 """Sync the volunteer Google Sheet with the staging area.
 
-Usage: python3 scripts/sheet_sync.py pull
+Usage: python3 scripts/sheet_sync.py pull | push | init
+
+push works out which rows to add to the Sheet and which cells to change, and writes files for a maintainer to
+paste in by hand (nothing can write to the Sheet yet). init writes the header rows for setting up a new Sheet.
 
 pull downloads the Tasks, Drafts and Orgs tabs through the Sheet's public CSV export, saves them as a
 dated snapshot under data/staging/<season>/sheet/, prints what changed since the last snapshot, and turns
@@ -16,6 +19,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote
 
@@ -38,6 +42,15 @@ TABS = (("Tasks", TASK_COLUMNS), ("Drafts", DRAFT_COLUMNS), ("Orgs", ORG_COLUMNS
 SNAPSHOT_DIR = "sheet"
 NEEDS_HELP_FILE = "_needs_help.csv"
 URL_RE = re.compile(r"https?://\S+")
+STALE_CLAIM_DAYS = 3
+HAND_ENTRY_KINDS = {"rec1", "gated", "manual"}
+TASK_MINUTES = {"find_page": 2, "check_draft": 10, "check_changes": 10, "enter_new": 45}
+REPEATABLE = ("check_changes", "find_page")
+PASTE_FILES = (("Tasks", "_to_paste_tasks.csv", TASK_COLUMNS), ("Drafts", "_to_paste_drafts.csv", DRAFT_COLUMNS),
+               ("Orgs", "_to_paste_orgs.csv", ORG_COLUMNS))
+CHANGES_FILE = "_changes.txt"
+INIT_DIR = "_init"
+HOW_TO = ROOT / "docs" / "ingestion" / "volunteer-how-to.md"
 
 
 class SheetError(Exception):
@@ -322,11 +335,231 @@ def pull(download=download_tab, root: Path = ROOT, today: str | None = None, sle
     return 0
 
 
+# ---- push: work out what to put in the Sheet ------------------------------------------------------------
+
+@dataclass
+class PushPlan:
+    new_tasks: list[dict] = field(default_factory=list)
+    new_drafts: list[dict] = field(default_factory=list)
+    new_orgs: list[dict] = field(default_factory=list)
+    cell_changes: list[tuple[str, str, str, str]] = field(default_factory=list)  # task_id, column, value, reason
+
+
+def task_for(source: dict, has_draft: bool) -> tuple[str, int] | None:
+    """The kind of task a source row needs and how many minutes it takes, or None."""
+    status = source.get("status_2027", "")
+    if not source.get("listing_url", "").strip() or "fetch failed" in source.get("notes", ""):
+        kind = "find_page"
+    elif status == "changed":
+        kind = "check_changes"
+    elif status == "extracted" and has_draft:
+        kind = "check_draft"
+    elif status == "posted" and (source.get("kind") in HAND_ENTRY_KINDS
+                                 or source.get("robots_ai_optout", "") != "FALSE"):
+        # A blank robots value means the site was never checked: enter it by hand, never read it with Claude.
+        kind = "enter_new"
+    else:
+        return None
+    return kind, TASK_MINUTES[kind]
+
+
+def task_id(org_id: str, kind: str, season: int, number: int = 1) -> str:
+    """<season>-<org_id>-<kind>, with -2, -3... for a repeat of the same kind."""
+    base = f"{season}-{org_id}-{kind}"
+    return base if number <= 1 else f"{base}-{number}"
+
+
+def _next_task_id(org_id: str, kind: str, season: int, snapshot: list[dict]) -> str | None:
+    """The id for a new task, or None when one is already in the Sheet (or an earlier one is still open)."""
+    base = task_id(org_id, kind, season)
+    pattern = re.compile(re.escape(base) + r"(?:-(\d+))?")
+    same = [(int(m.group(1) or 1), t) for t in snapshot if (m := pattern.fullmatch(t.get("task_id", "")))]
+    if not same:
+        return base
+    if kind not in REPEATABLE or any(t.get("status") != "done" for _, t in same):
+        return None
+    return task_id(org_id, kind, season, max(n for n, _ in same) + 1)
+
+
+def _release_stale(tasks: list[dict], today: str, skip: set[str]) -> list[tuple[str, str, str, str]]:
+    try:
+        today_date = dt.date.fromisoformat(today)
+    except ValueError:
+        return []
+    changes = []
+    for t in tasks:
+        if t.get("status") != "claimed" or t.get("task_id") in skip:
+            continue
+        try:
+            claimed = dt.date.fromisoformat(t.get("claimed_on", ""))
+        except ValueError:
+            continue  # blank or unreadable: leave it alone
+        if (today_date - claimed).days > STALE_CLAIM_DAYS:
+            reason = f"claim from {t['claimed_on']} expired"
+            changes += [(t["task_id"], "status", "open", reason), (t["task_id"], "claimed_by", "", reason)]
+    return changes
+
+
+def plan_push(sources_rows, orgs: dict[str, dict], staged: dict[str, list[dict]], snapshot_tasks: list[dict],
+              season: int, today: str, needs_help=()) -> PushPlan:
+    """What to add to the Sheet and which cells to change. Reads nothing and writes nothing."""
+    plan = PushPlan()
+    for src in sources_rows:
+        org = src["org_id"]
+        rows = staged.get(org, [])
+        need = task_for(src, bool(rows))
+        if not need:
+            continue
+        kind, minutes = need
+        tid = _next_task_id(org, kind, season, snapshot_tasks)
+        if tid is None:
+            continue
+        org_row = orgs.get(org, {})
+        plan.new_tasks.append({
+            "task_id": tid, "org_id": org, "org_name": org_row.get("org_name", ""), "kind": kind,
+            "minutes": str(minutes), "due": "" if kind == "find_page" else src.get("expected_open", ""),
+            "source_url": src.get("listing_url", ""), "status": "open", "claimed_by": "", "claimed_on": "",
+            "volunteer_notes": ""})
+        if kind in ("check_draft", "check_changes"):
+            for row in rows:
+                draft = {c: row.get(c, "") for c in DRAFT_COLUMNS}
+                draft.update(task_id=tid, row_id=row.get("program_id", ""), review="",
+                             source_url=row.get("source_url") or src.get("listing_url", ""),
+                             source_quote=row.get("source_quote", ""))
+                plan.new_drafts.append(draft)
+        if kind != "find_page":
+            plan.new_orgs.append({**{c: org_row.get(c, "") for c in ORG_COLUMNS}, "task_id": tid, "org_id": org})
+
+    flagged = {}
+    present = {t.get("task_id"): t for t in snapshot_tasks}
+    for tid, reason in needs_help:
+        task = present.get(tid)
+        if task and task.get("status") != "needs_help" and tid not in flagged:
+            flagged[tid] = reason
+    for tid, reason in flagged.items():
+        plan.cell_changes += [(tid, "status", "needs_help", "its rows did not pass the checks on the last pull"),
+                              (tid, "volunteer_notes", reason, "tells the volunteer what to fix")]
+    plan.cell_changes = _release_stale(snapshot_tasks, today, set(flagged)) + plan.cell_changes
+    return plan
+
+
+def paste_cell(value: str) -> str:
+    """A cell as it should be pasted: one a spreadsheet would read as a formula gets a leading apostrophe."""
+    return "'" + value if value[:1] in ("=", "+", "-", "@") else value
+
+
+def write_paste_file(path: Path, columns: list[str], rows: list[dict]) -> None:
+    """Rows only, no header, in the tab's column order. Written even when there are no rows."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, lineterminator="\n")
+        for row in rows:
+            w.writerow([paste_cell(row.get(c, "")) for c in columns])
+
+
+def change_lines(changes, snapshot_tasks: list[dict]) -> list[str]:
+    position = {t.get("task_id"): i for i, t in enumerate(snapshot_tasks)}
+    lines = []
+    for tid, column, value, reason in changes:
+        what = f"clear {column}" if value == "" else f"set {column} to {' '.join(value.split())}"
+        lines.append(f"Tasks row {position[tid] + 2} ({tid}): {what} \u2014 {reason}")
+    return lines
+
+
+def _read_needs_help_pairs(path: Path) -> list[tuple[str, str]]:
+    if not path.exists():
+        return []
+    with open(path, newline="", encoding="utf-8") as f:
+        return [(r.get("task_id", ""), r.get("reason", "")) for r in csv.DictReader(f)]
+
+
+def _read_csv_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with open(path, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def push(root: Path = ROOT, today: str | None = None) -> int:
+    """Write the rows to paste into the Sheet and the list of cells to change. Touches nothing else."""
+    root = Path(root)
+    today = today or dt.date.today().isoformat()
+    season = ingest_config.load()["season"]
+    folder = root / "data" / "staging" / str(season) / SNAPSHOT_DIR
+    data = root / "data"
+
+    org_rows = {r["org_id"]: r for r in _read_csv_rows(data / "organizations.csv")}
+    orgs = {k: dict(v) for k, v in org_rows.items()}
+    for fact in staging.load_org_facts(season, root):
+        for col, val in fact.items():
+            if val.strip() and fact["org_id"] in orgs:
+                orgs[fact["org_id"]][col] = val
+    source_rows = sources.load(data / "sources.csv")
+    staged = {org: staging.load(org, season, root) for org in staging.staged_org_ids(season, root)}
+    live = {}
+    for r in _read_csv_rows(data / "programs.csv"):
+        if r.get("program_year") == str(season) and r.get("confidence") != "inactive":
+            live.setdefault(r["org_id"], []).append(r)
+    for src in source_rows:
+        if src["status_2027"] == "changed" and live.get(src["org_id"]):
+            staged[src["org_id"]] = live[src["org_id"]]
+
+    snapshot = _previous(folder, "tasks", TASK_COLUMNS, "Tasks")
+    plan = plan_push(source_rows, orgs, staged, snapshot, season, today,
+                     needs_help=_read_needs_help_pairs(folder / NEEDS_HELP_FILE))
+
+    counts = {}
+    for tab, name, columns in PASTE_FILES:
+        rows = {"Tasks": plan.new_tasks, "Drafts": plan.new_drafts, "Orgs": plan.new_orgs}[tab]
+        write_paste_file(folder / name, columns, rows)
+        counts[tab] = len(rows)
+    lines = change_lines(plan.cell_changes, snapshot)
+    (folder / CHANGES_FILE).write_text("".join(f"{l}\n" for l in lines), encoding="utf-8")
+
+    by_kind = {}
+    for t in plan.new_tasks:
+        by_kind[t["kind"]] = by_kind.get(t["kind"], 0) + 1
+    kinds = f" ({', '.join(f'{n} {k}' for k, n in sorted(by_kind.items()))})" if by_kind else ""
+    print(f"Tasks: {counts['Tasks']} row(s) to paste{kinds}")
+    print(f"Drafts: {counts['Drafts']} row(s) to paste")
+    print(f"Orgs: {counts['Orgs']} row(s) to paste")
+    print(f"Cell changes: {len(lines)} (see {CHANGES_FILE})")
+    print(f"Files are in {folder}. For each tab: File > Import > Upload the _to_paste file, choose "
+          "'Append to current sheet', separator 'Comma', and turn OFF 'Convert text to numbers, dates and formulas'.")
+    return 0
+
+
+def init(root: Path = ROOT) -> int:
+    """Write the header rows and the How-to text for setting up the Sheet the first time."""
+    root = Path(root)
+    season = ingest_config.load()["season"]
+    folder = root / "data" / "staging" / str(season) / SNAPSHOT_DIR / INIT_DIR
+    for (tab, columns), name in zip(TABS, ("tasks_header.csv", "drafts_header.csv", "orgs_header.csv")):
+        _write_csv(folder / name, columns, [])
+    (folder / "how_to.txt").write_text(HOW_TO.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"Wrote the header rows and how_to.txt to {folder}")
+    print("First-time setup of the Google Sheet:")
+    print("  1. Name the four tabs exactly: Tasks, Drafts, Orgs, How to")
+    print("  2. In each tab, select all cells and set Format > Number > Plain text BEFORE pasting anything "
+          "(Google's CSV export otherwise guesses column types and can blank cells or reformat dates)")
+    print("  3. Paste each header file into row 1 of its tab: tasks_header.csv into Tasks, drafts_header.csv "
+          "into Drafts, orgs_header.csv into Orgs")
+    print("  4. Paste the text of how_to.txt into cell A1 of the How to tab")
+    print("  5. Run `python3 scripts/sheet_sync.py push`, then import the _to_paste files as it explains")
+    return 0
+
+
 def main(argv, root: Path = ROOT, download=download_tab, today: str | None = None, sleep=time.sleep) -> int:
     ap = argparse.ArgumentParser(prog="sheet_sync.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("pull", help="download the Sheet and stage finished tasks")
-    ap.parse_args(argv[1:])
+    sub.add_parser("push", help="write the rows to paste into the Sheet and the cells to change")
+    sub.add_parser("init", help="write the header rows for setting up a new Sheet")
+    args = ap.parse_args(argv[1:])
+    if args.cmd == "push":
+        return push(root=root, today=today)
+    if args.cmd == "init":
+        return init(root=root)
     return pull(download=download, root=root, today=today, sleep=sleep)
 
 
