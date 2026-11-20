@@ -1005,8 +1005,9 @@ function clearAllFilters() {
     scholarship: '',
     county: '',
     stars: '',
-    date: '',
-    status: ''
+    status: '',
+    data: '',
+    showPast: false
   };
 
   searchInput.value = '';
@@ -1020,7 +1021,7 @@ function clearAllFilters() {
   filterCounty.value = '';
   filterStars.value = '';
   filterStatus.value = '';
-  filterDate.value = '';
+  if (filterDate) filterDate.value = '';
   filterShowPast.checked = false;
   activeFilters.showPast = false;
 }
@@ -1051,10 +1052,12 @@ btnReset.addEventListener('click', () => {
   update();
 });
 
-filterDate.addEventListener('change', e => {
-  activeFilters.date = e.target.value; // back to "YYYY-MM-DD" when cleared
-  update();
-});
+if (filterDate) {
+  filterDate.addEventListener('change', e => {
+    activeFilters.date = e.target.value; // back to "YYYY-MM-DD" when cleared
+    update();
+  });
+}
 
 modalClose.addEventListener('click', closeModal);
 document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
