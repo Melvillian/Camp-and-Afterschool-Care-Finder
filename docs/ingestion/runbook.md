@@ -70,7 +70,7 @@ This is the last check before anything reaches the site. Volunteers and Claude b
 ls data/staging/2027/
 ```
 
-Every `<org_id>.csv` there that is not already `merged` is a candidate. For each one, open it and look at:
+Every `<org_id>.csv` there that is not already `merged` is a candidate. (`_organizations.csv` and the `sheet/` folder in that listing are not organization files; skip them.) For each one, open it and look at:
 
 - **`source_quote` against the dates.** The quote is the sentence the row came from. Do the `start_date` and `end_date`, the price and the ages agree with it? Is any date in the wrong year?
 - **Any row marked `delete`** in the `review` column. Make sure that camp really is gone. A `delete` sets the live row to `inactive`.
@@ -191,7 +191,7 @@ Then apply `_changes.txt`. It holds one line per cell to change on the Tasks tab
 node --test tests/js/ && python3 -m unittest discover -s tests/py -v && python3 scripts/smoke_test.py
 ```
 
-It should end with all three passing. (The smoke test needs Chrome.) Then commit what changed under `data/` (the `sources.csv`, staging files, the snapshot in `data/staging/2027/sheet/`, `programs.csv`, `organizations.csv`) and `data.js`:
+It should end with all three passing. (The smoke test needs Chrome.) From 2026-12-20 the Python suite fails on purpose until the Sheet is secured; see part 6. Then commit what changed under `data/` (the `sources.csv`, staging files, the snapshot in `data/staging/2027/sheet/`, `programs.csv`, `organizations.csv`) and `data.js`:
 
 ```
 git status
@@ -220,7 +220,7 @@ node --test tests/js/ && python3 -m unittest discover -s tests/py -v && python3 
 git add data data.js && git commit && gh pr create --repo Melvillian/Camp-and-Afterschool-Care-Finder --base main
 ```
 
-Timing, from the design: weekly runs from mid-December. Early January is when the lottery and early-registration camps announce, so read those first (`expected_open` in `sources.csv` is seeded from last year's dates). February to mid-March is the long tail of camps that post late.
+Timing, from the design: weekly runs from mid-December. Early January is when the lottery and early-registration camps announce, so read those first (`expected_open` in `sources.csv` is filled in for only 7 organizations so far; add more as registration dates become known). February to mid-March is the long tail of camps that post late.
 
 ## 3. First-time Sheet setup
 
@@ -281,7 +281,7 @@ Work a volunteer did since the snapshot is lost; the Sheet's own version history
 From 2026-12-20, this test fails:
 
 ```
-python3 -m unittest
+python3 -m unittest discover -s tests/py
 ```
 
 with this message:
@@ -331,6 +331,6 @@ If you change `.claude/skills/extract-camp-listings/SKILL.md`, test it on the in
 
 ## 8. Not built yet, and when each is decided
 
-- **Direct Sheet writes.** Today `push` makes files and you import them. Writing straight to the Sheet needs a Google service-account key, which Melvillian will create. It also needs a way to sign tokens that the Python standard library cannot do, so the choice (one optional dependency, or calling `openssl`) is made when the key exists. `push` already separates "work out what to write" from "write it", so the writing can be added alone. Decide this when the key exists, and not before.
+- **Direct Sheet writes.** Today `push` makes files and you import them. Writing straight to the Sheet needs a Google service-account key, which you will create. It also needs a way to sign tokens that the Python standard library cannot do, so the choice (one optional dependency, or calling `openssl`) is made when the key exists. `push` already separates "work out what to write" from "write it", so the writing can be added alone. Decide this when the key exists, and not before.
 - **The Rec1 browser route.** Burlington, Colchester, South Burlington and Winooski use Rec1, which blocks plain HTTP requests. A script that drives a real browser would get past that. It is not built. The plan is to ask the departments for a spreadsheet export first (the letter is `docs/ingestion/rec1-export-request.md`). **Decide in early January:** if no export has arrived by then, choose whether to build the browser route or let volunteers type those camps in. Until then, the Rec1 towns are `enter_new` tasks, set by hand (step 1.4).
 - Who sends the export letter is still open. Nothing else waits on it.

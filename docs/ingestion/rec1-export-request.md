@@ -10,6 +10,8 @@ Who sends it is not decided yet. If no export has arrived by early January, the 
 - South Burlington Recreation & Parks
 - Colchester Parks & Recreation
 
+Winooski Recreation & Park also uses the same registration system (Rec1) and can be added to this list. The letter below is not addressed to it.
+
 ## Letter
 
 Subject: Request for a spreadsheet of summer 2027 camp sessions
@@ -18,7 +20,7 @@ Dear [department name] staff,
 
 I am a volunteer with the Camp & Afterschool Care Finder, a free website that helps Vermont families find summer camps and afterschool programs. It is free and run by volunteers. The site is at https://kefortney.github.io/Camp-and-Afterschool-Care-Finder/ and its code is open at https://github.com/kefortney/Camp-and-Afterschool-Care-Finder.
 
-Your summer camps are on the site. Families search by age, town and price, and each listing links back to your registration page, so families sign up with you.
+Your summer camps are on the site. Families filter by grade, town, cost, subject and week, and each listing links back to your registration page, so families sign up with you.
 
 I am writing to ask for help keeping your listings correct for summer 2027. Would it be possible to send us a spreadsheet (CSV or Excel is fine) of your summer 2027 camp sessions, once they are set? For each session, we would need:
 
