@@ -412,7 +412,7 @@ function clearExportSelection() {
 
 function refreshExportUiForUid(uid) {
   if (currentView === 'list') {
-    const card = cardsGrid.querySelector(`article.program-card[data-export-uid="${uid}"]`);
+    const card = cardsGrid.querySelector(`article.program-card[data-export-uid="${CSS.escape(uid)}"]`);
     if (card) {
       const cb = card.querySelector('.card-export-checkbox');
       const sel = isExportSelected(uid);

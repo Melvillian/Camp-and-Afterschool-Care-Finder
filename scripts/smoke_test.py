@@ -79,6 +79,7 @@ def stage_site(dest):
 
 
 def main():
+    check("selector uses CSS.escape", "CSS.escape(uid)" in (ROOT / "app.js").read_text(encoding="utf-8"))
     chrome = find_chrome()
     if not chrome:
         print("Chrome not found; set CHROME to its path", file=sys.stderr)

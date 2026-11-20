@@ -298,7 +298,7 @@ def build_program_obj(prog: dict, org: dict, uid: int) -> dict:
 
     return {
         "id":                   uid,
-        "uid":                  f"{prog_type}-{uid}",
+        "uid":                  prog.get("program_id", "") or f"{prog_type}-{uid}",
         "category":             prog_type,
         "name":                 name,
         "type":                 type_label,
