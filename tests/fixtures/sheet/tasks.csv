@@ -1,0 +1,5 @@
+task_id,org_id,org_name,kind,minutes,due,source_url,status,claimed_by,claimed_on,volunteer_notes
+t-alpha,alpha,Alpha Camp,check_draft,10,2027-02-01,,done,Sam,2027-01-05,
+t-beta,beta,Beta Club,check_draft,10,2027-02-01,,done,Pat,2027-01-06,
+t-gamma,gamma,Gamma Arts,find_page,2,2027-02-01,,done,Lee,,https://gamma.example.org/summer.pdf
+t-delta,delta,Delta Sports,enter_new,30,2027-03-01,,claimed,Kim,2027-01-07,

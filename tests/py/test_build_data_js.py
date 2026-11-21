@@ -18,5 +18,17 @@ class StableUid(unittest.TestCase):
         self.assertEqual(first["uid"], later["uid"])
         self.assertEqual((first["id"], later["id"]), (1, 99))
 
+class OrgRegistration(unittest.TestCase):
+    def test_org_object_carries_registration_fields(self):
+        o = b.build_org_obj({"org_id": "o1", "org_name": "Org", "registration_opens": "2027-02-04",
+                             "registration_opens_early": "2027-01-28", "registration_notes": "Residents first"})
+        self.assertEqual((o["registrationOpens"], o["registrationOpensEarly"], o["registrationNotes"]),
+                         ("2027-02-04", "2027-01-28", "Residents first"))
+
+    def test_blank_fields_are_empty_strings(self):
+        o = b.build_org_obj({"org_id": "o1", "org_name": "Org"})
+        self.assertEqual((o["registrationOpensEarly"], o["registrationNotes"]), ("", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
