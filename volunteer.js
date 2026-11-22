@@ -5,7 +5,8 @@
 (function () {
   const L = window.CampLib;
   const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const GROUPS = [['quick', '2 minutes'], ['medium', '10 minutes'], ['long', '30–60 minutes']];
+  // Titles match the buckets in CampLib.groupTasks: minutes <= 5, 6-15, and longer (or unreadable).
+  const GROUPS = [['quick', '5 minutes or less'], ['medium', '6 to 15 minutes'], ['long', 'More than 15 minutes']];
 
   const LIVE_TIMEOUT_MS = 8000;
   const GROUP_LIMIT = 50;
@@ -124,7 +125,9 @@
     if (live) return render(config, live, null);
     const saved = await loadSnapshot(config);
     if (saved) return render(config, saved.tasks, saved);
-    render(config, [], null);
+    // Neither the Sheet nor the saved copy could be read: that is not the same as an empty list.
+    el('boardPrograms').textContent = programsSentence(config.season);
+    el('boardMessage').textContent = 'The task list could not be loaded right now. Please try again in a few minutes.';
   }
 
   boot();

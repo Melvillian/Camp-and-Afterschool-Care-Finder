@@ -6,7 +6,7 @@ Utility scripts for building, validating, and enriching the camp/afterschool dat
 
 - **`build_data_js.py`** — Builds `data.js` (consumed by the frontend) by merging `data/organizations.csv` + `data/programs.csv`. Runs `validate_data.py` first and aborts on errors.
 - **`validate_data.py`** — Validates the two CSVs for foreign-key integrity, required fields, and enum values. Acts as the gate before `build_data_js.py` writes output.
-- **`dev_server.py`** — Local static dev server with lightweight live-reload, used while iterating on the site.
+- **`dev_server.py`** — Local static dev server with lightweight live-reload, used while iterating on the site. Binds only to `127.0.0.1` or `localhost`. Its `POST /__save_csv` lets the Admin page write `data/programs.csv` and `data/organizations.csv`, and nothing else; it refuses requests whose Host or Origin is not this server or whose Content-Type is not `application/json`.
 
 ## Data enrichment (CSV-in-place)
 

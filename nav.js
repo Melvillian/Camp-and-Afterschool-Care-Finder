@@ -6,8 +6,12 @@
     { label: 'Data',        href: 'data.html',         key: 'data' },
     { label: 'Hackathon',   href: 'hackathon.html',    key: 'hackathon' },
     { label: 'Volunteer',   href: 'volunteer.html',    key: 'volunteer' },
-    { label: 'Admin',       href: 'admin.html',        key: 'admin' },
   ];
+
+  // The Admin page is a local editing tool: it is linked only when the site runs on this machine.
+  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
+    NAV_ITEMS.push({ label: 'Admin', href: 'admin.html', key: 'admin' });
+  }
 
   function renderNav() {
     const activeKey = window.NAV_PAGE || '';

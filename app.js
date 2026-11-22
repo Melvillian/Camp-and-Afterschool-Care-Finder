@@ -4,7 +4,8 @@ let allPrograms = [];
 let lastFiltered = [];
 let currentView = 'list';
 let mapInstance = null;
-let calendarState = { year: 2026, month: 5 };
+// The month the calendar opens on; init() sets it from the data (CampLib.calendarStart).
+let calendarState = { year: new Date().getFullYear(), month: new Date().getMonth() };
 let currentProgram = null;
 
 /** Ordered list of program `uid` values selected for CSV export */
@@ -34,8 +35,6 @@ let activeFilters = {
   maxCost: '',
   scholarship: '',
   county: '',
-  stars: '',
-  status: '',
   date: '',
   showPast: false
 };
@@ -50,8 +49,6 @@ const filterWeek = document.getElementById('filterWeek');
 const filterMaxCost = document.getElementById('filterMaxCost');
 const filterScholarship = document.getElementById('filterScholarship');
 const filterCounty = document.getElementById('filterCounty');
-const filterStars = document.getElementById('filterStars');
-const filterStatus = document.getElementById('filterStatus');
 const filterShowPast = document.getElementById('filterShowPast');
 const filterDate = document.getElementById('filterDate');
 
@@ -61,14 +58,10 @@ const labelCity = document.getElementById('labelCity');
 const labelSubject = document.getElementById('labelSubject');
 const labelWeek = document.getElementById('labelWeek');
 const labelCounty = document.getElementById('labelCounty');
-const labelStars = document.getElementById('labelStars');
-const labelStatus = document.getElementById('labelStatus');
 const labelMaxCost = document.getElementById('labelMaxCost');
 const labelScholarship = document.getElementById('labelScholarship');
 
 const groupCounty = document.getElementById('groupCounty');
-const groupStars = document.getElementById('groupStars');
-const groupStatus = document.getElementById('groupStatus');
 
 const cardsGrid = document.getElementById('cardsGrid');
 const resultsCount = document.getElementById('resultsCount');
@@ -99,8 +92,6 @@ const categoryUiConfig = {
     subjectAny: 'All Activities',
     weekLabel: 'Week',
     countyLabel: 'County',
-    starsLabel: 'STARS Rating',
-    statusLabel: 'Status',
     maxCostLabel: 'Max Cost (weekly)',
     scholarshipLabel: 'Financial Aid',
     emptyTitle: 'No camps found',
@@ -118,12 +109,10 @@ const categoryUiConfig = {
     subjectAny: 'All Tags',
     weekLabel: 'Week',
     countyLabel: 'County',
-    starsLabel: 'STARS Rating',
-    statusLabel: 'Status',
     maxCostLabel: 'Max Cost (weekly)',
     scholarshipLabel: 'Financial Aid',
     emptyTitle: 'No afterschool programs found',
-    emptyHint: 'Try broadening county, rating, or status filters to see more options.'
+    emptyHint: 'Try broadening the grade, city or county filters to see more options.'
   },
 };
 
@@ -225,8 +214,6 @@ function applyCategoryUiText() {
   if (labelSubject) labelSubject.textContent = ui.subjectLabel;
   if (labelWeek) labelWeek.textContent = ui.weekLabel;
   if (labelCounty) labelCounty.textContent = ui.countyLabel;
-  if (labelStars) labelStars.textContent = ui.starsLabel;
-  if (labelStatus) labelStatus.textContent = ui.statusLabel;
   if (labelMaxCost) labelMaxCost.textContent = ui.maxCostLabel;
   if (labelScholarship) labelScholarship.textContent = ui.scholarshipLabel;
   if (noResultsTitle) noResultsTitle.textContent = ui.emptyTitle;
@@ -284,8 +271,6 @@ function updateFilterVisibility() {
   show(filterMaxCost.closest('.filter-group'), isCamp);
   show(filterScholarship.closest('.filter-group'), isCamp);
   show(groupCounty, isProvider);
-  show(groupStars, isProvider);
-  show(groupStatus, isProvider);
 
   // camps only filtering for now
   const groupDate = document.getElementById('groupDate');
@@ -300,21 +285,17 @@ function populateFiltersForCategory() {
   const cities = [...new Set(programs.map(p => p.city).filter(Boolean))].sort();
   const subjects = [...new Set(programs.flatMap(p => p.subjects || []).filter(Boolean))].sort();
   const counties = [...new Set(programs.map(p => p.county).filter(Boolean))].sort();
-  const stars = [...new Set(programs.map(p => p.starsLevel).filter(Boolean))].sort();
 
   populateDropdown(filterType, types, ui.typeAny);
   populateDropdown(filterCity, cities, ui.cityAny);
   populateDropdown(filterSubject, subjects, ui.subjectAny);
   populateDropdown(filterCounty, counties, 'All Counties');
-  populateDropdown(filterStars, stars, 'Any Rating');
   populateWeekDropdown(programs);
 
   filterType.value = activeFilters.type;
   filterCity.value = activeFilters.city;
   filterSubject.value = activeFilters.subject;
   filterCounty.value = activeFilters.county;
-  filterStars.value = activeFilters.stars;
-  filterStatus.value = activeFilters.status;
   filterWeek.value = activeFilters.week;
 }
 
@@ -359,8 +340,6 @@ function applyFilters() {
       }
     } else {
       if (activeFilters.county && p.county !== activeFilters.county) return false;
-      if (activeFilters.stars && p.starsLevel !== activeFilters.stars) return false;
-      if (activeFilters.status && p.referralStatus !== activeFilters.status) return false;
     }
 
     return true;
@@ -623,7 +602,6 @@ function renderCards(programs) {
           ${gradesText ? `<div class="meta-item"><span class="meta-icon">🎓</span><span class="meta-value">${CampLib.escapeHtml(gradesText)}</span></div>` : ''}
           ${p.hours ? `<div class="meta-item"><span class="meta-icon">🕐</span><span class="meta-value">${CampLib.escapeHtml(p.hours)}</span></div>` : ''}
           <div class="meta-item"><span class="meta-icon">💰</span><span class="meta-value">${costDisplay} ${scholarshipHtml}</span></div>
-          ${p.starsLevel ? `<div class="meta-item"><span class="meta-icon">⭐</span><span class="meta-value">${CampLib.escapeHtml(p.starsLevel)}</span></div>` : ''}
         </div>
         <div class="tags">${subjectTags}</div>
       </div>
@@ -1004,8 +982,6 @@ function clearAllFilters() {
     maxCost: '',
     scholarship: '',
     county: '',
-    stars: '',
-    status: '',
     date: '',
     showPast: false
   };
@@ -1019,8 +995,6 @@ function clearAllFilters() {
   filterMaxCost.value = '';
   filterScholarship.value = '';
   filterCounty.value = '';
-  filterStars.value = '';
-  filterStatus.value = '';
   if (filterDate) filterDate.value = '';
   filterShowPast.checked = false;
   activeFilters.showPast = false;
@@ -1036,8 +1010,6 @@ filterWeek.addEventListener('change', e => { activeFilters.week = e.target.value
 filterMaxCost.addEventListener('change', e => { activeFilters.maxCost = e.target.value; update(); });
 filterScholarship.addEventListener('change', e => { activeFilters.scholarship = e.target.value; update(); });
 filterCounty.addEventListener('change', e => { activeFilters.county = e.target.value; update(); });
-filterStars.addEventListener('change', e => { activeFilters.stars = e.target.value; update(); });
-filterStatus.addEventListener('change', e => { activeFilters.status = e.target.value; update(); });
 filterShowPast.addEventListener('change', e => { activeFilters.showPast = e.target.checked; update(); });
 
 btnClearSearch.addEventListener('click', () => {
@@ -1188,6 +1160,7 @@ function init() {
     seasonNotice.textContent = `Listings marked ${seasonYear} are last season's, shown for reference until that camp posts new dates.`;
     seasonNotice.classList.remove('hidden');
   }
+  calendarState = CampLib.calendarStart(categoryPrograms(), TODAY);
   applyCategoryUiText();
   updateFilterVisibility();
   populateFiltersForCategory();

@@ -5,6 +5,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin – Camp &amp; Afterschool Care Finder</title>
+  <meta name="robots" content="noindex" />
   <style>
     /* ===== Design Tokens (match main site) ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -248,6 +249,8 @@
     /* ===== Stats ===== */
     .stats { font-size: 0.88rem; color: var(--gray-600); margin-bottom: 0.75rem; }
     .stats strong { color: var(--text); }
+    .row-locked { font-size: 0.78rem; color: var(--gray-600); }
+    .btn-icon:disabled, #btnSaveAll:disabled, #btnAdd:disabled { opacity: 0.45; cursor: not-allowed; }
 
     /* ===== Table ===== */
     .table-wrapper {
@@ -437,11 +440,13 @@
     <div class="page-hero-content">
       <span class="page-hero-icon">⚙️</span>
       <h1>Data Editor</h1>
-      <p>Manage programs and organizations. Edit and save back to CSV; rebuild data.js with <code>python scripts/build_data_js.py</code>.</p>
+      <p>A local tool for correcting programs and organizations. Saving works only when this page is opened through the local dev server (<code>python3 scripts/dev_server.py</code>); it writes the two CSV files on your machine, and you then rebuild <code>data.js</code> with <code>python3 scripts/build_data_js.py</code>. Nothing here changes the public site.</p>
     </div>
   </div>
 
   <main>
+    <div id="adminNotice" class="local-edits-banner" role="status">Checking whether this page can save…</div>
+
     <div class="toolbar">
       <div class="view-toggle">
         <button class="view-btn active" data-view="programs">Programs</button>
@@ -462,6 +467,7 @@
     </div>
 
     <p class="stats" id="tableStats"></p>
+    <p class="stats" id="editInfo"></p>
 
     <!-- Programs table -->
     <div class="table-wrapper" id="programsView">
@@ -526,6 +532,7 @@
                 </select>
               </div>
             </div>
+            <p class="stats" id="fYearLine"></p>
             <div class="form-row">
               <div class="form-group">
                 <label for="fCategory">Program Type</label>
@@ -604,11 +611,11 @@
               </div>
               <div class="form-group">
                 <label for="fAgeMin">Age Min</label>
-                <input type="number" id="fAgeMin" min="3" max="19" placeholder="—" />
+                <input type="number" id="fAgeMin" min="0" max="99" placeholder="—" />
               </div>
               <div class="form-group">
                 <label for="fAgeMax">Age Max</label>
-                <input type="number" id="fAgeMax" min="3" max="19" placeholder="—" />
+                <input type="number" id="fAgeMax" min="0" max="99" placeholder="—" />
               </div>
             </div>
           </fieldset>
@@ -650,20 +657,10 @@
                   <option value="session">Per Session</option>
                 </select>
               </div>
-              <div class="form-group">
-                <label for="fIndoorOutdoor">Setting</label>
-                <select id="fIndoorOutdoor">
-                  <option value="Indoor">Indoor</option>
-                  <option value="Outdoor">Outdoor</option>
-                  <option value="Both">Both</option>
-                </select>
-              </div>
             </div>
             <div class="form-row checkbox-row">
-              <label><input type="checkbox" id="fScholarship" /> Scholarship Available</label>
               <label><input type="checkbox" id="fTransportation" /> Transportation</label>
               <label><input type="checkbox" id="fMeals" /> Meals Provided</label>
-              <label><input type="checkbox" id="fAccepting" /> Accepting Registration</label>
             </div>
           </fieldset>
 
@@ -690,7 +687,7 @@
 
           <!-- Subjects -->
           <fieldset>
-            <legend>Subjects &amp; Activities</legend>
+            <legend>Subjects &amp; Activities <small style="font-weight:400;color:#6b7280;">(the row's <code>activities</code> tags; while none are set, the site infers tags from the name and description)</small></legend>
             <div class="subjects-grid" id="subjectsGrid"></div>
           </fieldset>
 
@@ -705,8 +702,8 @@
             </div>
             <div class="form-row">
               <div class="form-group full">
-                <label for="fNotes">Internal Notes</label>
-                <textarea id="fNotes" rows="2" placeholder="Not shown publicly — use for data quality notes, follow-up reminders, etc."></textarea>
+                <label for="fNotes">Maintainer Notes <small style="font-weight:400;color:#6b7280;">(public: not displayed on the pages, but published in the repository and in data.js)</small></label>
+                <textarea id="fNotes" rows="2" placeholder="Data quality notes, follow-up reminders. Anyone can read these, so nothing private."></textarea>
               </div>
             </div>
           </fieldset>
@@ -870,7 +867,7 @@
             <legend>Notes</legend>
             <div class="form-row">
               <div class="form-group full">
-                <label for="ofNotes">Internal Notes</label>
+                <label for="ofNotes">Maintainer Notes <small style="font-weight:400;color:#6b7280;">(public: not displayed on the pages, but published in the repository and in data.js)</small></label>
                 <textarea id="ofNotes" rows="2"></textarea>
               </div>
             </div>
@@ -886,7 +883,7 @@
   </div>
 
   <footer>
-    <p>Admin Tool – Camp &amp; Afterschool Care Finder &mdash; Save All writes to <code>data/programs.csv</code> and <code>data/organizations.csv</code> when running the dev server, then run <code>python scripts/build_data_js.py</code> to rebuild. Falls back to localStorage when not using the dev server.</p>
+    <p>Admin Tool – Camp &amp; Afterschool Care Finder &mdash; a local tool. Save All works only through the local dev server (<code>python3 scripts/dev_server.py</code>): it writes <code>data/programs.csv</code> and <code>data/organizations.csv</code> on your machine. Then run <code>python3 scripts/build_data_js.py</code> to rebuild. Opened any other way, this page cannot save anything.</p>
   </footer>
 
   <script src="lib.js"></script>
@@ -908,8 +905,12 @@
     const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
     // ===== State =====
-    // Load programs from data.js PROGRAMS (preferred) or localStorage fallback
+    // The tables list what data.js holds (the rows the site shows). Edits are kept as changes to cells of the
+    // two CSV files (`pending`), never as whole rows rebuilt from data.js: data.js leaves out inactive rows and
+    // several columns, and fills blanks with values the CSV does not hold.
     const LOCAL_KEYS = ['adminProgramData', 'adminOrgData', 'adminDataStamp', 'adminSavedAt'];
+    const AWAITING_BUILD_KEY = 'adminSavedAwaitingBuild';
+    const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
     const CURRENT_STAMP = typeof DATA_GENERATED !== 'undefined' ? DATA_GENERATED : '';
     const localEdits = CampLib.localEditsStatus({
       programs: localStorage.getItem('adminProgramData'),
@@ -918,11 +919,18 @@
       savedAt:  localStorage.getItem('adminSavedAt'),
     }, CURRENT_STAMP);
 
-    let campRows = localEdits.programs ||
-                  (typeof PROGRAMS !== 'undefined' ? PROGRAMS : []);
-    let orgRows  = localEdits.orgs ||
-                  (typeof ORGANIZATIONS !== 'undefined' ? [...ORGANIZATIONS] : []);
+    let campRows = typeof PROGRAMS !== 'undefined' ? PROGRAMS.map(p => ({ ...p })) : [];
+    let orgRows  = typeof ORGANIZATIONS !== 'undefined' ? ORGANIZATIONS.map(o => ({ ...o })) : [];
 
+    let canEdit = false;       // true once the dev server, both CSVs and the ingestion season are loaded
+    let ingestSeason = null;   // data/ingest_config.json "season": rows of that season belong to merge_staging.py
+    let csvBase = null;        // { programs, orgs }: the CSV files as loaded
+    const noChanges = () => ({ edits: {}, deleted: [], added: [] });
+    let pending = { programs: noChanges(), orgs: noChanges() };
+    let formBaseline = null;    // the program form as it opened
+    let orgFormBaseline = null; // the organization form as it opened
+
+    // Earlier versions of this page kept whole edited rows in the browser. They cannot be applied safely.
     if (localEdits.useLocal) {
       const when = localEdits.savedAt && !isNaN(new Date(localEdits.savedAt))
         ? new Date(localEdits.savedAt).toLocaleString() : 'an earlier visit';
@@ -931,14 +939,14 @@
       banner.className = 'local-edits-banner';
       banner.innerHTML =
         `<span>${CampLib.escapeHtml(
-          `You are viewing edits saved in this browser on ${when}, not the published data.` +
-          (localEdits.stale ? ' The published data has changed since then.' : ''))}</span> ` +
-        `<button type="button" class="btn-secondary" id="btnDiscardLocal">Discard local edits</button>`;
+          `This browser holds edits kept by an older version of this page on ${when}. ` +
+          'They were never written to the data files and are not shown or saved.')}</span> ` +
+        `<button type="button" class="btn-secondary" id="btnDiscardLocal">Discard them</button>`;
       const toolbar = document.querySelector('main .toolbar');
       toolbar.parentNode.insertBefore(banner, toolbar);
       document.getElementById('btnDiscardLocal').addEventListener('click', () => {
         LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
-        location.reload();
+        banner.remove();
       });
     }
 
@@ -1064,6 +1072,22 @@
     }
 
     // ===== Render Programs Table =====
+    function programLocked(p) {
+      return !CampLib.adminMayEdit(p.programYear, ingestSeason);
+    }
+
+    function programActions(p) {
+      if (canEdit && programLocked(p)) {
+        const year = Number(p.programYear) > 0 ? p.programYear : 'No year';
+        return `<span class="row-locked" title="Rows of the season being ingested are changed only by scripts/merge_staging.py">${esc(year)}: merge_staging.py only</span>`;
+      }
+      const off = canEdit ? '' : ' disabled title="Editing is off; see the notice at the top of the page"';
+      return `<div class="td-actions">
+            <button class="btn-icon edit" data-uid="${esc(p.uid)}"${off}>✏ Edit</button>
+            <button class="btn-icon del"  data-uid="${esc(p.uid)}"${off}>✕ Delete</button>
+          </div>`;
+    }
+
     function renderTable() {
       const rows = getSortedFiltered();
       const tbody = document.getElementById('adminTbody');
@@ -1079,10 +1103,7 @@
           <td><span class="type-badge ${badgeClass}">${typeLabel}</span></td>
           <td>${esc(gradeRange(p))}</td>
           <td>${fmtDate(p.startDate)}</td>
-          <td><div class="td-actions">
-            <button class="btn-icon edit" data-uid="${esc(p.uid)}">✏ Edit</button>
-            <button class="btn-icon del"  data-uid="${esc(p.uid)}">✕ Delete</button>
-          </div></td>
+          <td>${programActions(p)}</td>
         </tr>`;
       }).join('');
 
@@ -1137,8 +1158,8 @@
           <td>${esc(o.county || '—')}</td>
           <td><span class="type-badge ${o.confidence === 'confirmed' ? 'badge-camp' : 'badge-both'}">${esc(o.confidence || '—')}</span></td>
           <td><div class="td-actions">
-            <button class="btn-icon edit" data-orgid="${esc(o.orgId)}">✏ Edit</button>
-            <button class="btn-icon del"  data-orgid="${esc(o.orgId)}">✕ Delete</button>
+            <button class="btn-icon edit" data-orgid="${esc(o.orgId)}"${canEdit ? '' : ' disabled'}>✏ Edit</button>
+            <button class="btn-icon del"  data-orgid="${esc(o.orgId)}"${canEdit ? '' : ' disabled'}>✕ Delete</button>
           </div></td>
         </tr>`;
       }).join('');
@@ -1178,236 +1199,330 @@
       }
     }
 
-    // ===== Blank Program =====
-    function blankProgram() {
-      return {
-        uid: null, id: null,
-        category: 'camp', orgId: '', orgName: '', name: '',
-        sessionType: 'day', scheduleType: 'seasonal', confidence: 'confirmed',
-        address: '', city: '', county: '',
-        gradesMin: '', gradesMax: '', ageMin: null, ageMax: null,
-        cost: 0, costPeriod: 'week', scholarshipAvailable: false,
-        hours: '', daysOffered: 'Mon–Fri',
-        subjects: [], description: '', indoorOutdoor: 'Both',
-        transportation: false, mealsProvided: false,
-        acceptingRegistration: true, startDate: '', endDate: '',
-        registrationUrl: '', registrationOpens: '', registrationOpensEarly: '',
-        registrationNotes: '', notes: ''
-      };
+    // ===== The CSV rows behind the tables =====
+    function baseRow(kind, idCol, id) {
+      return csvBase ? csvBase[kind].rows.find(r => r[idCol] === id) : undefined;
+    }
+
+    // A row as it will be saved: the CSV row with this session's edits, or a row added this session.
+    function effectiveRow(kind, idCol, id) {
+      const added = pending[kind].added.find(r => r[idCol] === id);
+      if (added) return added;
+      if (pending[kind].deleted.includes(id)) return null;
+      const base = baseRow(kind, idCol, id);
+      return base ? { ...base, ...(pending[kind].edits[id] || {}) } : null;
+    }
+
+    function recordEdit(kind, idCol, id, patch) {
+      if (!Object.keys(patch).length) return false;
+      const added = pending[kind].added.find(r => r[idCol] === id);
+      if (added) Object.assign(added, patch);
+      else pending[kind].edits[id] = { ...(pending[kind].edits[id] || {}), ...patch };
+      return true;
+    }
+
+    function recordDelete(kind, idCol, id) {
+      const i = pending[kind].added.findIndex(r => r[idCol] === id);
+      if (i >= 0) { pending[kind].added.splice(i, 1); return; }
+      delete pending[kind].edits[id];
+      if (!pending[kind].deleted.includes(id)) pending[kind].deleted.push(id);
+    }
+
+    function blankRow(kind) {
+      const row = {};
+      csvBase[kind].header.forEach(h => { row[h] = ''; });
+      return row;
+    }
+
+    const SEASON_REFUSAL = () =>
+      `Programs for ${ingestSeason} cannot be added or changed here. They come in through the volunteer Sheet ` +
+      'and scripts/merge_staging.py, the only writer of those rows (see docs/ingestion/runbook.md).';
+
+    function datesInSeason(form) {
+      const d = CampLib.validIso(form.endDate) ? form.endDate : CampLib.validIso(form.startDate) ? form.startDate : '';
+      return !!d && Number(d.slice(0, 4)) >= Number(ingestSeason);
     }
 
     // ===== Edit Modal (Programs) =====
+    // The form's fields for a program: what was last saved in this session, else what data.js holds.
+    function programForm(p) {
+      if (p._form) return p._form;
+      return {
+        name: p.name || '', orgId: p.orgId || '', category: p.category || 'camp',
+        sessionType: p.sessionTypeCsv || '', scheduleType: p.scheduleTypeCsv || '',
+        confidence: p.confidence || '', address: p.address || '', city: p.city || '', county: p.county || '',
+        registrationUrl: p.registrationUrl || '', gradesMin: p.gradesMin || '', gradesMax: p.gradesMax || '',
+        ageMin: p.ageMin != null ? String(p.ageMin) : '', ageMax: p.ageMax != null ? String(p.ageMax) : '',
+        startDate: p.startDate || '', endDate: p.endDate || '', hours: p.hours || '',
+        daysOffered: p.daysOffered || '', cost: p.cost ? String(p.cost) : '', costPeriod: p.costPeriod || 'week',
+        transportation: !!p.transportation, mealsProvided: !!p.mealsProvided,
+        registrationOpens: p.registrationOpens || '', registrationOpensEarly: p.registrationOpensEarly || '',
+        registrationNotes: p.registrationNotes || '', notes: p.programNotes || '',
+        description: p.description || '',
+        subjects: String(p.activitiesCsv || '').split(',').map(t => t.trim()).filter(Boolean),
+      };
+    }
+
+    const NEW_PROGRAM_FORM = {
+      name: '', orgId: '', category: 'camp', sessionType: 'day', scheduleType: 'weekly', confidence: 'likely',
+      address: '', city: '', county: '', registrationUrl: '', gradesMin: '', gradesMax: '', ageMin: '', ageMax: '',
+      startDate: '', endDate: '', hours: '', daysOffered: '', cost: '', costPeriod: 'week',
+      transportation: false, mealsProvided: false, registrationOpens: '', registrationOpensEarly: '',
+      registrationNotes: '', notes: '', description: '', subjects: [],
+    };
+
+    function setSelect(id, value) {
+      const sel = document.getElementById(id);
+      sel.value = value;
+      // A value the list does not offer is shown as it is, so opening and saving a row never changes it.
+      if (sel.value !== value) {
+        sel.insertAdjacentHTML('beforeend', `<option value="${esc(value)}" data-extra="1">${esc(value || '— unset —')}</option>`);
+        sel.value = value;
+      }
+    }
+
     function openEditModal(uid) {
+      if (!canEdit) return;
+      const p = uid === null ? null : campRows.find(x => x.uid === uid);
+      if (uid !== null && (!p || programLocked(p))) return;
       editingUid = uid;
-      const p = uid === null ? blankProgram() : campRows.find(x => x.uid === uid);
-      if (!p) return;
+      const f = p ? programForm(p) : NEW_PROGRAM_FORM;
 
+      document.querySelectorAll('#editForm option[data-extra]').forEach(o => o.remove());
       document.getElementById('modalHeading').textContent = uid === null ? 'Add Program' : 'Edit Program';
-      document.getElementById('fName').value           = p.name || '';
-      document.getElementById('fOrgId').value          = p.orgId || '';
-      document.getElementById('fCategory').value       = p.category || 'camp';
-      document.getElementById('fSessionType').value    = p.sessionType || 'day';
-      document.getElementById('fScheduleType').value   = p.scheduleType || 'seasonal';
-      document.getElementById('fConfidence').value     = p.confidence || 'confirmed';
-      document.getElementById('fAddress').value        = p.address || '';
-      document.getElementById('fCity').value           = p.city || '';
-      document.getElementById('fCounty').value         = p.county || '';
-      document.getElementById('fRegUrl').value         = p.registrationUrl || p.website || '';
-      document.getElementById('fRegOpens').value      = p.registrationOpens || '';
-      document.getElementById('fRegOpensEarly').value = p.registrationOpensEarly || '';
-      document.getElementById('fRegNotes').value      = p.registrationNotes || '';
-      document.getElementById('fNotes').value         = p.notes || p.programNotes || '';
-      document.getElementById('fGradesMin').value      = p.gradesMin || '';
-      document.getElementById('fGradesMax').value      = p.gradesMax || '';
-      document.getElementById('fAgeMin').value         = p.ageMin != null ? p.ageMin : '';
-      document.getElementById('fAgeMax').value         = p.ageMax != null ? p.ageMax : '';
-      document.getElementById('fStartDate').value      = p.startDate || '';
-      document.getElementById('fEndDate').value        = p.endDate || '';
-      document.getElementById('fHours').value          = p.hours || '';
-      document.getElementById('fDays').value           = p.daysOffered || 'Mon–Fri';
-      document.getElementById('fCost').value           = p.cost != null ? p.cost : '';
-      document.getElementById('fCostPeriod').value     = p.costPeriod || 'week';
-      document.getElementById('fIndoorOutdoor').value  = p.indoorOutdoor || 'Both';
-      document.getElementById('fScholarship').checked  = !!p.scholarshipAvailable;
-      document.getElementById('fTransportation').checked = !!p.transportation;
-      document.getElementById('fMeals').checked        = !!p.mealsProvided;
-      document.getElementById('fAccepting').checked    = p.acceptingRegistration !== false;
-      document.getElementById('fDescription').value    = p.description || '';
-
-      const subs = p.subjects || [];
+      document.getElementById('fYearLine').textContent = p
+        ? `Program year ${p.programYear} (${p.programId}). The year and id of a row do not change.`
+        : `The program year is taken from the dates (or ${ingestSeason - 1} when there are none). Programs for ${ingestSeason} cannot be added here.`;
+      document.getElementById('fName').value           = f.name;
+      setSelect('fOrgId', f.orgId);
+      setSelect('fCategory', f.category);
+      setSelect('fSessionType', f.sessionType);
+      setSelect('fScheduleType', f.scheduleType);
+      setSelect('fConfidence', f.confidence);
+      document.getElementById('fAddress').value        = f.address;
+      document.getElementById('fCity').value           = f.city;
+      document.getElementById('fCounty').value         = f.county;
+      document.getElementById('fRegUrl').value         = f.registrationUrl;
+      document.getElementById('fRegOpens').value       = f.registrationOpens;
+      document.getElementById('fRegOpensEarly').value  = f.registrationOpensEarly;
+      document.getElementById('fRegNotes').value       = f.registrationNotes;
+      document.getElementById('fNotes').value          = f.notes;
+      setSelect('fGradesMin', f.gradesMin);
+      setSelect('fGradesMax', f.gradesMax);
+      document.getElementById('fAgeMin').value         = f.ageMin;
+      document.getElementById('fAgeMax').value         = f.ageMax;
+      document.getElementById('fStartDate').value      = f.startDate;
+      document.getElementById('fEndDate').value        = f.endDate;
+      document.getElementById('fHours').value          = f.hours;
+      document.getElementById('fDays').value           = f.daysOffered;
+      document.getElementById('fCost').value           = f.cost;
+      setSelect('fCostPeriod', f.costPeriod);
+      document.getElementById('fTransportation').checked = f.transportation;
+      document.getElementById('fMeals').checked        = f.mealsProvided;
+      document.getElementById('fDescription').value    = f.description;
       SUBJECTS.forEach(s => {
         const cb = document.getElementById(subjectToId(s));
-        if (cb) cb.checked = subs.includes(s);
+        if (cb) cb.checked = f.subjects.includes(s);
       });
 
+      // What the form holds now is the baseline: only fields that differ from it at save time are written.
+      formBaseline = readForm();
       document.getElementById('btnDuplicate').style.display = uid === null ? 'none' : '';
       openModal('editModal');
       document.getElementById('fName').focus();
     }
 
-    function readFormIntoObject() {
-      const ageMinVal = document.getElementById('fAgeMin').value;
-      const ageMaxVal = document.getElementById('fAgeMax').value;
-      const costVal   = document.getElementById('fCost').value;
-      const orgId     = document.getElementById('fOrgId').value;
-      const org       = orgRows.find(o => o.orgId === orgId);
-
-      const subjects = SUBJECTS.filter(s => {
-        const cb = document.getElementById(subjectToId(s));
-        return cb && cb.checked;
-      });
-
+    function readForm() {
+      const val = id => document.getElementById(id).value;
       return {
-        uid:                  editingUid,
-        id:                   null,
-        category:             document.getElementById('fCategory').value,
-        orgId:                orgId,
-        orgName:              org ? org.name : orgId,
-        organization:         org ? org.name : orgId,
-        name:                 document.getElementById('fName').value.trim(),
-        sessionType:          document.getElementById('fSessionType').value,
-        scheduleType:         document.getElementById('fScheduleType').value,
-        confidence:           document.getElementById('fConfidence').value,
-        address:              document.getElementById('fAddress').value.trim(),
-        city:                 document.getElementById('fCity').value.trim(),
-        county:               document.getElementById('fCounty').value.trim(),
-        registrationUrl:      document.getElementById('fRegUrl').value.trim(),
-        gradesMin:            document.getElementById('fGradesMin').value,
-        gradesMax:            document.getElementById('fGradesMax').value,
-        ageMin:               ageMinVal ? parseInt(ageMinVal, 10) : null,
-        ageMax:               ageMaxVal ? parseInt(ageMaxVal, 10) : null,
-        cost:                 costVal ? parseFloat(costVal) : 0,
-        costPeriod:           document.getElementById('fCostPeriod').value,
-        scholarshipAvailable: document.getElementById('fScholarship').checked,
-        hours:                document.getElementById('fHours').value.trim(),
-        daysOffered:          document.getElementById('fDays').value.trim(),
-        subjects:             subjects,
-        description:          document.getElementById('fDescription').value.trim(),
-        indoorOutdoor:        document.getElementById('fIndoorOutdoor').value,
-        transportation:       document.getElementById('fTransportation').checked,
-        mealsProvided:        document.getElementById('fMeals').checked,
-        acceptingRegistration: document.getElementById('fAccepting').checked,
-        startDate:            document.getElementById('fStartDate').value,
-        endDate:              document.getElementById('fEndDate').value,
-        registrationOpens:      document.getElementById('fRegOpens').value,
-        registrationOpensEarly: document.getElementById('fRegOpensEarly').value,
-        registrationNotes:      document.getElementById('fRegNotes').value.trim(),
-        notes:                  document.getElementById('fNotes').value.trim(),
-        // Pass through merged org contact fields so modal display still works
-        phone:   org ? org.phone   : '',
-        email:   org ? org.email   : '',
-        website: org ? org.website : '',
-        state:   'VT',
-        zip:     org ? org.zip     : '',
+        name: val('fName').trim(), orgId: val('fOrgId'), category: val('fCategory'),
+        sessionType: val('fSessionType'), scheduleType: val('fScheduleType'), confidence: val('fConfidence'),
+        address: val('fAddress').trim(), city: val('fCity').trim(), county: val('fCounty').trim(),
+        registrationUrl: val('fRegUrl').trim(), gradesMin: val('fGradesMin'), gradesMax: val('fGradesMax'),
+        ageMin: val('fAgeMin'), ageMax: val('fAgeMax'), startDate: val('fStartDate'), endDate: val('fEndDate'),
+        hours: val('fHours').trim(), daysOffered: val('fDays').trim(), cost: val('fCost'), costPeriod: val('fCostPeriod'),
+        transportation: document.getElementById('fTransportation').checked,
+        mealsProvided: document.getElementById('fMeals').checked,
+        registrationOpens: val('fRegOpens'), registrationOpensEarly: val('fRegOpensEarly'),
+        registrationNotes: val('fRegNotes').trim(), notes: val('fNotes').trim(), description: val('fDescription').trim(),
+        subjects: SUBJECTS.filter(s => { const cb = document.getElementById(subjectToId(s)); return cb && cb.checked; }),
       };
     }
 
-    function handleSave(e) {
-      e.preventDefault();
-      const entry = readFormIntoObject();
-      // Keep activitiesCsv in sync with whatever subjects are checked
-      entry.activitiesCsv = (entry.subjects || []).join(',');
+    // Bring a table row up to date with a saved form.
+    function showForm(p, f) {
+      const org = orgRows.find(o => o.orgId === f.orgId);
+      const num = v => (v === '' ? null : Number(v));
+      Object.assign(p, {
+        name: f.name, orgId: f.orgId, orgName: org ? org.name : f.orgId, organization: org ? org.name : f.orgId,
+        category: f.category, city: f.city, county: f.county, gradesMin: f.gradesMin, gradesMax: f.gradesMax,
+        ageMin: num(f.ageMin), ageMax: num(f.ageMax), startDate: f.startDate, endDate: f.endDate,
+        confidence: f.confidence, subjects: f.subjects, _form: f,
+      });
+    }
 
-      if (editingUid === null) {
-        const maxId = Math.max(0, ...campRows.map(p => p.id || 0));
-        entry.id  = maxId + 1;
-        entry.uid = `prog-${entry.id}`;
-        campRows.push(entry);
-      } else {
-        const idx = campRows.findIndex(p => p.uid === editingUid);
-        if (idx >= 0) {
-          entry.id  = campRows[idx].id;
-          entry.uid = campRows[idx].uid;
-          // Preserve raw CSV fields not captured by the edit form
-          const RAW = ['programId','programYear','sessionTypeCsv','scheduleTypeCsv',
-            'startTime','endTime','costRaw','preAfterCare','transportNotes','verifiedDate'];
-          RAW.forEach(k => { if (campRows[idx][k] !== undefined) entry[k] = campRows[idx][k]; });
-          campRows[idx] = entry;
-        }
-      }
+    // Add a program row: from the form alone, or a copy of `source` (a CSV row) with the form's changes.
+    function addProgram(form, source) {
+      const year = source ? Number(source.program_year) : CampLib.adminProgramYear(form.startDate, form.endDate, ingestSeason);
+      if (!CampLib.adminMayEdit(year, ingestSeason) || datesInSeason(form)) { alert(SEASON_REFUSAL()); return false; }
+      const row = source ? { ...source } : blankRow('programs');
+      Object.assign(row, CampLib.programFormPatch(source ? formBaseline : {}, form, row.activities));
+      row.program_name = form.name;
+      row.program_year = String(year);
+      if (source) row.verified_date = '';
+      const taken = new Set(csvBase.programs.rows.map(r => r.program_id).concat(pending.programs.added.map(r => r.program_id)));
+      row.program_id = CampLib.newProgramId(row.org_id, row.program_name, year, taken);
+      pending.programs.added.push(row);
+      const p = { uid: row.program_id, programId: row.program_id, programYear: row.program_year,
+                  id: Math.max(0, ...campRows.map(x => x.id || 0)) + 1 };
+      showForm(p, form);
+      campRows.push(p);
+      return true;
+    }
 
+    function afterProgramChange() {
       refreshTypeFilterOptions();
       markDirty();
       closeModal('editModal');
       renderTable();
     }
 
+    function handleSave(e) {
+      e.preventDefault();
+      if (!canEdit) return;
+      const form = readForm();
+
+      if (editingUid === null) {
+        if (addProgram(form, null)) afterProgramChange();
+        return;
+      }
+      const p = campRows.find(x => x.uid === editingUid);
+      if (!p || programLocked(p)) return;
+      const row = effectiveRow('programs', 'program_id', p.programId);
+      if (!row) {
+        alert('This program is not in data/programs.csv, so there is nothing to change. data.js is out of date: run python3 scripts/build_data_js.py and reload.');
+        return;
+      }
+      const datesChanged = form.startDate !== formBaseline.startDate || form.endDate !== formBaseline.endDate;
+      if (datesChanged && datesInSeason(form)) { alert(SEASON_REFUSAL()); return; }
+      const changed = recordEdit('programs', 'program_id', p.programId, CampLib.programFormPatch(formBaseline, form, row.activities));
+      if (!changed) { closeModal('editModal'); return; }
+      showForm(p, form);
+      afterProgramChange();
+    }
+
+    function handleDuplicate() {
+      if (!canEdit || editingUid === null) return;
+      const p = campRows.find(x => x.uid === editingUid);
+      const source = p && effectiveRow('programs', 'program_id', p.programId);
+      if (!source) return;
+      const form = readForm();
+      form.name += ' (Copy)';
+      if (addProgram(form, source)) afterProgramChange();
+    }
+
     // ===== Org Modal =====
-    function blankOrg() {
+    function orgForm(o) {
+      if (o._form) return o._form;
       return {
-        orgId: '', name: '', type: '', phone: '', email: '', website: '',
-        address: '', city: '', county: '', state: 'VT', zip: '',
-        financialAidAvailable: false, financialAidNotes: '', confidence: 'likely', notes: '',
-        registrationOpens: '', registrationOpensEarly: '', registrationNotes: ''
+        orgId: o.orgId || '', name: o.name || '', type: o.type || '', confidence: o.confidence || '',
+        phone: o.phone || '', email: o.email || '', website: o.website || '', address: o.address || '',
+        city: o.city || '', county: o.county || '', state: o.state || '', zip: o.zip || '',
+        financialAidAvailable: !!o.financialAidAvailable, financialAidNotes: o.financialAidNotes || '',
+        registrationOpens: o.registrationOpens || '', registrationOpensEarly: o.registrationOpensEarly || '',
+        registrationNotes: o.registrationNotes || '', notes: o.notes || '',
       };
     }
 
+    const NEW_ORG_FORM = {
+      orgId: '', name: '', type: '', confidence: 'likely', phone: '', email: '', website: '', address: '',
+      city: '', county: '', state: 'VT', zip: '', financialAidAvailable: false, financialAidNotes: '',
+      registrationOpens: '', registrationOpensEarly: '', registrationNotes: '', notes: '',
+    };
+
     function openOrgModal(orgId) {
+      if (!canEdit) return;
+      const o = orgId === null ? null : orgRows.find(x => x.orgId === orgId);
+      if (orgId !== null && !o) return;
       editingOrgId = orgId;
-      const o = orgId === null ? blankOrg() : orgRows.find(x => x.orgId === orgId);
-      if (!o) return;
+      const f = o ? orgForm(o) : NEW_ORG_FORM;
 
+      document.querySelectorAll('#orgForm option[data-extra]').forEach(x => x.remove());
       document.getElementById('orgModalHeading').textContent = orgId === null ? 'Add Organization' : 'Edit Organization';
-      document.getElementById('ofId').value          = o.orgId || '';
+      document.getElementById('ofId').value          = f.orgId;
       document.getElementById('ofId').readOnly       = orgId !== null; // can't rename slug
-      document.getElementById('ofName').value        = o.name || '';
-      document.getElementById('ofType').value        = o.type || '';
-      document.getElementById('ofConfidence').value  = o.confidence || 'likely';
-      document.getElementById('ofPhone').value       = o.phone || '';
-      document.getElementById('ofEmail').value       = o.email || '';
-      document.getElementById('ofWebsite').value     = o.website || '';
-      document.getElementById('ofAddress').value     = o.address || '';
-      document.getElementById('ofCity').value        = o.city || '';
-      document.getElementById('ofCounty').value      = o.county || '';
-      document.getElementById('ofState').value       = o.state || 'VT';
-      document.getElementById('ofZip').value         = o.zip || '';
-      document.getElementById('ofFinAid').checked    = !!o.financialAidAvailable;
-      document.getElementById('ofFinAidNotes').value = o.financialAidNotes || '';
-      document.getElementById('ofRegOpens').value      = o.registrationOpens || '';
-      document.getElementById('ofRegOpensEarly').value = o.registrationOpensEarly || '';
-      document.getElementById('ofRegNotes').value     = o.registrationNotes || '';
-      document.getElementById('ofNotes').value       = o.notes || '';
+      document.getElementById('ofName').value        = f.name;
+      setSelect('ofType', f.type);
+      setSelect('ofConfidence', f.confidence);
+      document.getElementById('ofPhone').value       = f.phone;
+      document.getElementById('ofEmail').value       = f.email;
+      document.getElementById('ofWebsite').value     = f.website;
+      document.getElementById('ofAddress').value     = f.address;
+      document.getElementById('ofCity').value        = f.city;
+      document.getElementById('ofCounty').value      = f.county;
+      document.getElementById('ofState').value       = f.state;
+      document.getElementById('ofZip').value         = f.zip;
+      document.getElementById('ofFinAid').checked    = f.financialAidAvailable;
+      document.getElementById('ofFinAidNotes').value = f.financialAidNotes;
+      document.getElementById('ofRegOpens').value      = f.registrationOpens;
+      document.getElementById('ofRegOpensEarly').value = f.registrationOpensEarly;
+      document.getElementById('ofRegNotes').value      = f.registrationNotes;
+      document.getElementById('ofNotes').value       = f.notes;
 
+      orgFormBaseline = readOrgForm();
       openModal('orgModal');
       document.getElementById('ofName').focus();
     }
 
+    function readOrgForm() {
+      const val = id => document.getElementById(id).value;
+      return {
+        orgId: val('ofId').trim(), name: val('ofName').trim(), type: val('ofType'), confidence: val('ofConfidence'),
+        phone: val('ofPhone').trim(), email: val('ofEmail').trim(), website: val('ofWebsite').trim(),
+        address: val('ofAddress').trim(), city: val('ofCity').trim(), county: val('ofCounty').trim(),
+        state: val('ofState').trim(), zip: val('ofZip').trim(),
+        financialAidAvailable: document.getElementById('ofFinAid').checked,
+        financialAidNotes: val('ofFinAidNotes').trim(), registrationOpens: val('ofRegOpens'),
+        registrationOpensEarly: val('ofRegOpensEarly'), registrationNotes: val('ofRegNotes').trim(),
+        notes: val('ofNotes').trim(),
+      };
+    }
+
+    function showOrgForm(o, f) {
+      Object.assign(o, f, { _form: f });
+    }
+
     function handleOrgSave(e) {
       e.preventDefault();
-      const entry = {
-        orgId:                document.getElementById('ofId').value.trim(),
-        name:                 document.getElementById('ofName').value.trim(),
-        type:                 document.getElementById('ofType').value,
-        confidence:           document.getElementById('ofConfidence').value,
-        phone:                document.getElementById('ofPhone').value.trim(),
-        email:                document.getElementById('ofEmail').value.trim(),
-        website:              document.getElementById('ofWebsite').value.trim(),
-        address:              document.getElementById('ofAddress').value.trim(),
-        city:                 document.getElementById('ofCity').value.trim(),
-        county:               document.getElementById('ofCounty').value.trim(),
-        state:                document.getElementById('ofState').value.trim() || 'VT',
-        zip:                  document.getElementById('ofZip').value.trim(),
-        financialAidAvailable: document.getElementById('ofFinAid').checked,
-        financialAidNotes:    document.getElementById('ofFinAidNotes').value.trim(),
-        registrationOpens:      document.getElementById('ofRegOpens').value,
-        registrationOpensEarly: document.getElementById('ofRegOpensEarly').value,
-        registrationNotes:      document.getElementById('ofRegNotes').value.trim(),
-        notes:                document.getElementById('ofNotes').value.trim(),
-      };
+      if (!canEdit) return;
+      const form = readOrgForm();
 
       if (editingOrgId === null) {
-        if (!entry.orgId) {
+        if (!form.orgId) {
           alert('Org ID (slug) is required for new organizations.');
           return;
         }
-        if (orgRows.some(o => o.orgId === entry.orgId)) {
-          alert(`Org ID "${entry.orgId}" already exists.`);
+        // The CSV also holds inactive organizations, which this page does not list.
+        if (effectiveRow('orgs', 'org_id', form.orgId) || baseRow('orgs', 'org_id', form.orgId)) {
+          alert(`Org ID "${form.orgId}" already exists in data/organizations.csv.`);
           return;
         }
-        orgRows.push(entry);
+        pending.orgs.added.push({ ...blankRow('orgs'), ...CampLib.orgFormPatch({}, form) });
+        const o = {};
+        showOrgForm(o, form);
+        orgRows.push(o);
       } else {
-        const idx = orgRows.findIndex(o => o.orgId === editingOrgId);
-        if (idx >= 0) orgRows[idx] = { ...orgRows[idx], ...entry }; // keep fields the form has no input for
+        const o = orgRows.find(x => x.orgId === editingOrgId);
+        if (!o) return;
+        if (!effectiveRow('orgs', 'org_id', editingOrgId)) {
+          alert('This organization is not in data/organizations.csv, so there is nothing to change. data.js is out of date: run python3 scripts/build_data_js.py and reload.');
+          return;
+        }
+        if (!recordEdit('orgs', 'org_id', editingOrgId, CampLib.orgFormPatch(orgFormBaseline, form))) {
+          closeModal('orgModal');
+          return;
+        }
+        showOrgForm(o, form);
       }
 
       buildOrgSelect(); // refresh dropdown options
@@ -1418,12 +1533,14 @@
 
     // ===== Delete =====
     function confirmDelete(id, kind) {
+      if (!canEdit) return;
       if (kind === 'program') {
+        const p = campRows.find(x => x.uid === id);
+        if (!p || programLocked(p)) return;
         deletingUid   = id;
         deletingOrgId = null;
-        const p = campRows.find(x => x.uid === id);
         document.getElementById('deleteModalHeading').textContent = 'Delete Program?';
-        document.getElementById('deleteModalName').textContent = p ? p.name : id;
+        document.getElementById('deleteModalName').textContent = p.name;
       } else {
         deletingOrgId = id;
         deletingUid   = null;
@@ -1435,19 +1552,28 @@
     }
 
     function executeDelete() {
+      if (!canEdit) return;
       if (deletingUid !== null) {
-        campRows = campRows.filter(p => p.uid !== deletingUid);
+        const p = campRows.find(x => x.uid === deletingUid);
+        if (!p || programLocked(p)) return;
+        recordDelete('programs', 'program_id', p.programId);
+        campRows = campRows.filter(x => x.uid !== deletingUid);
         refreshTypeFilterOptions();
         closeModal('deleteModal');
         renderTable();
       } else if (deletingOrgId !== null) {
-        // Guard: don't delete an org that programs reference
-        const inUse = campRows.some(p => p.orgId === deletingOrgId);
+        // Guard: don't delete an org that any program row references, listed here or not (inactive rows too).
+        const ids = csvBase.programs.rows.map(r => r.program_id).concat(pending.programs.added.map(r => r.program_id));
+        const inUse = ids.some(id => {
+          const row = effectiveRow('programs', 'program_id', id);
+          return row && row.org_id === deletingOrgId;
+        });
         if (inUse) {
-          alert('Cannot delete: programs still reference this organization. Re-assign them first.');
+          alert('Cannot delete: programs in data/programs.csv still reference this organization. Re-assign them first.');
           closeModal('deleteModal');
           return;
         }
+        recordDelete('orgs', 'org_id', deletingOrgId);
         orgRows = orgRows.filter(o => o.orgId !== deletingOrgId);
         buildOrgSelect();
         closeModal('deleteModal');
@@ -1456,157 +1582,149 @@
       markDirty();
     }
 
-    // ===== CSV helpers =====
-    function slugify(s) {
-      return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    // ===== Loading and saving the CSV files =====
+    function showNotice(text) {
+      const el = document.getElementById('adminNotice');
+      el.textContent = text;
+      el.style.display = text ? '' : 'none';
     }
 
-    function escCsvField(v) {
-      const s = (v == null) ? '' : String(v);
-      return (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r'))
-        ? '"' + s.replace(/"/g, '""') + '"'
-        : s;
+    async function fetchText(url) {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(url + ': HTTP ' + res.status);
+      return res.text();
     }
 
-    function rowsToCsv(headers, rows) {
-      const lines = [headers.join(',')];
-      for (const row of rows) lines.push(headers.map(h => escCsvField(row[h])).join(','));
-      return lines.join('\n') + '\n';
+    async function loadTables() {
+      const [programsText, orgsText] = await Promise.all([fetchText('data/programs.csv'), fetchText('data/organizations.csv')]);
+      const programs = CampLib.parseCsvTable(programsText);
+      const orgs = CampLib.parseCsvTable(orgsText);
+      if (!programs.header.includes('program_id') || !programs.header.includes('program_year')) throw new Error('data/programs.csv has no program_id or program_year column');
+      if (!orgs.header.includes('org_id')) throw new Error('data/organizations.csv has no org_id column');
+      programs.text = programsText;
+      orgs.text = orgsText;
+      return { programs, orgs };
     }
 
-    function programToCsvRow(p) {
-      const pid = p.programId ||
-        [p.orgId, slugify(p.name), p.programYear || new Date().getFullYear()]
-          .filter(Boolean).join('-').slice(0, 80);
-      const hoursParts = (p.hours || '').split(/\s*[–\-]\s*/);
-      const startTime  = p.startTime || (hoursParts[0] || '').trim();
-      const endTime    = p.endTime   || (hoursParts[1] || '').trim();
-      return {
-        program_id:              pid,
-        org_id:                  p.orgId || '',
-        program_name:            p.name || '',
-        program_type:            p.category || 'camp',
-        program_year:            p.programYear || new Date().getFullYear(),
-        description:             p.description || '',
-        session_type:            p.sessionTypeCsv || '',
-        grades_min:              p.gradesMin || '',
-        grades_max:              p.gradesMax || '',
-        age_min:                 p.ageMin != null ? p.ageMin : '',
-        age_max:                 p.ageMax != null ? p.ageMax : '',
-        schedule_type:           p.scheduleTypeCsv || '',
-        start_date:              p.startDate || '',
-        end_date:                p.endDate || '',
-        days_of_week:            p.daysOffered || '',
-        start_time:              startTime,
-        end_time:                endTime,
-        pre_after_care:          p.preAfterCare || '',
-        cost_raw:                p.costRaw || (p.cost ? `$${p.cost}${p.costPeriod === 'week' ? '/week' : p.costPeriod === 'day' ? '/day' : ''}` : ''),
-        cost_per_week:           (p.costPeriod === 'week' && p.cost) ? p.cost : '',
-        cost_notes:              '',
-        meals_provided:          p.mealsProvided ? 'Yes' : '',
-        transportation_provided: p.transportation ? 'Yes' : '',
-        transportation_notes:    p.transportNotes || '',
-        activities:              p.activitiesCsv || (p.subjects || []).join(','),
-        site_address:            p.address || '',
-        site_city:               p.city || '',
-        site_county:             p.county || '',
-        registration_url:        p.registrationUrl || '',
-        registration_opens:      p.registrationOpens || '',
-        registration_opens_early: p.registrationOpensEarly || '',
-        registration_notes:      p.registrationNotes || '',
-        funding_source:          p.fundingSource || '',
-        confidence:              p.confidence || 'likely',
-        verified_date:           p.verifiedDate || '',
-        notes:                   p.notes || p.programNotes || '',
-      };
+    function setEditing(on) {
+      canEdit = on;
+      document.getElementById('btnSaveAll').disabled = !on;
+      document.getElementById('btnAdd').disabled = !on;
+      if (activeView === 'programs') renderTable(); else renderOrgsTable();
     }
 
-    function orgToCsvRow(o) {
-      return {
-        org_id:                  o.orgId || '',
-        org_name:                o.name || '',
-        org_type:                o.type || '',
-        website:                 o.website || '',
-        phone:                   o.phone || '',
-        email:                   o.email || '',
-        street_address:          o.address || '',
-        city:                    o.city || '',
-        county:                  o.county || '',
-        state:                   o.state || 'VT',
-        zip:                     o.zip || '',
-        financial_aid_available: o.financialAidAvailable ? 'Yes' : '',
-        financial_aid_notes:     o.financialAidNotes || '',
-        registration_policy:     o.registrationPolicy || '',
-        registration_opens:      o.registrationOpens || '',
-        registration_opens_early: o.registrationOpensEarly || '',
-        registration_notes:      o.registrationNotes || '',
-        confidence:              o.confidence || 'likely',
-        verified_date:           o.verifiedDate || '',
-        notes:                   o.notes || '',
-      };
+    function describeEditing() {
+      const listed = new Set(campRows.map(p => p.programId));
+      const listedOrgs = new Set(orgRows.map(o => o.orgId));
+      const hiddenPrograms = csvBase.programs.rows.filter(r => !listed.has(r.program_id)).length;
+      const hiddenOrgs = csvBase.orgs.rows.filter(r => !listedOrgs.has(r.org_id)).length;
+      const locked = campRows.filter(programLocked).length;
+      const parts = [`Programs of seasons before ${ingestSeason} can be edited here.`];
+      if (locked) parts.push(`${locked} listed program${locked === 1 ? ' is' : 's are'} locked: rows for ${ingestSeason} are changed only by scripts/merge_staging.py.`);
+      if (hiddenPrograms || hiddenOrgs) {
+        parts.push(`${hiddenPrograms} program row${hiddenPrograms === 1 ? '' : 's'} and ${hiddenOrgs} organization row${hiddenOrgs === 1 ? '' : 's'} in the CSV files are not listed here (inactive, or added since data.js was built). Saving leaves them as they are.`);
+      }
+      document.getElementById('editInfo').textContent = parts.join(' ');
+    }
+
+    // Decide whether this page can save, and say so. Editing stays off unless everything needed is in place.
+    async function startEditing() {
+      setEditing(false);
+      if (!LOCAL_HOSTS.includes(location.hostname)) {
+        showNotice('Local tool only: changes here are not saved to the site, so editing is off. To correct the data, clone the repository, run python3 scripts/dev_server.py and open this page from there.');
+        return;
+      }
+      try {
+        const probe = await fetch('/__reload_version', { cache: 'no-store' });
+        if (!probe.ok || typeof (await probe.json()).version !== 'string') throw new Error('not the dev server');
+      } catch (e) {
+        showNotice('Editing is off: this page can save only through the local dev server. Stop this server, run python3 scripts/dev_server.py and reload.');
+        return;
+      }
+      if (CURRENT_STAMP && localStorage.getItem(AWAITING_BUILD_KEY) === CURRENT_STAMP) {
+        showNotice('Your changes are saved in the CSV files, but data.js has not been rebuilt, so this page still lists the data from before the save. Run python3 scripts/build_data_js.py; the page reloads and editing comes back.');
+        return;
+      }
+      localStorage.removeItem(AWAITING_BUILD_KEY);
+      try {
+        const config = JSON.parse(await fetchText('data/ingest_config.json'));
+        if (!(Number(config.season) > 0)) throw new Error('data/ingest_config.json has no season');
+        csvBase = await loadTables();
+        ingestSeason = Number(config.season);
+      } catch (e) {
+        showNotice('Editing is off: the data files could not be read (' + e.message + ').');
+        return;
+      }
+      showNotice('');
+      setEditing(true);
+      describeEditing();
+    }
+
+    function hasChanges() {
+      return ['programs', 'orgs'].some(k =>
+        Object.keys(pending[k].edits).length || pending[k].deleted.length || pending[k].added.length);
     }
 
     // ===== Save All =====
     async function saveAll() {
-      // Always write to localStorage first as a backup
-      localStorage.setItem('adminProgramData', JSON.stringify(campRows));
-      localStorage.setItem('adminOrgData',     JSON.stringify(orgRows));
-      localStorage.setItem('adminDataStamp',   CURRENT_STAMP);
-      localStorage.setItem('adminSavedAt',     new Date().toISOString());
-      isDirty = false;
-      document.getElementById('dirtyBadge').style.display = 'none';
-
+      if (!canEdit) return;
       const btn  = document.getElementById('btnSaveAll');
       const orig = btn.textContent;
+      const flash = text => {
+        btn.textContent = text;
+        setTimeout(() => { btn.textContent = orig; btn.disabled = !canEdit; }, 2500);
+      };
       btn.disabled = true;
 
-      const PROG_HEADERS = [
-        'program_id','org_id','program_name','program_type','program_year','description',
-        'session_type','grades_min','grades_max','age_min','age_max','schedule_type',
-        'start_date','end_date','days_of_week','start_time','end_time','pre_after_care',
-        'cost_raw','cost_per_week','cost_notes','meals_provided','transportation_provided',
-        'transportation_notes','activities','site_address','site_city','site_county',
-        'registration_url','registration_opens','registration_opens_early','registration_notes',
-        'funding_source','confidence','verified_date','notes',
-      ];
-      const ORG_HEADERS = [
-        'org_id','org_name','org_type','website','phone','email','street_address',
-        'city','county','state','zip','financial_aid_available','financial_aid_notes',
-        'registration_policy','registration_opens','registration_opens_early','registration_notes','confidence','verified_date','notes',
-      ];
-
-      try {
-        const [pr, or] = await Promise.all([
-          fetch('/__save_csv', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-              path: 'data/programs.csv',
-              content: rowsToCsv(PROG_HEADERS, campRows.map(programToCsvRow)),
-            }),
-          }),
-          fetch('/__save_csv', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-              path: 'data/organizations.csv',
-              content: rowsToCsv(ORG_HEADERS, orgRows.map(orgToCsvRow)),
-            }),
-          }),
-        ]);
-        if (pr.ok && or.ok) {
-          // Clear localStorage so the next page load uses the rebuilt data.js
-          LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
-          btn.textContent = '✓ Saved to CSV';
-        } else {
-          btn.textContent = '✓ Saved (localStorage only)';
-        }
-      } catch {
-        // Dev server not running — localStorage backup is enough
-        btn.textContent = '✓ Saved (localStorage only)';
+      if (!hasChanges()) {
+        isDirty = false;
+        document.getElementById('dirtyBadge').style.display = 'none';
+        flash('Nothing to save');
+        return;
       }
 
-      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+      try {
+        // Read the files again, so rows changed on disk since this page loaded (a merge, a hand edit) are kept.
+        const fresh = await loadTables();
+        const programs = CampLib.applyTableChanges(fresh.programs, 'program_id', pending.programs);
+        const orgs = CampLib.applyTableChanges(fresh.orgs, 'org_id', pending.orgs);
+        const touched = CampLib.seasonRowChanges(fresh.programs.rows, programs.rows, ingestSeason);
+        if (touched.length) throw new Error(`refusing to save: it would change ${ingestSeason} rows (${touched.slice(0, 3).join(', ')})`);
+
+        const files = [
+          ['data/organizations.csv', CampLib.toCsv(fresh.orgs.header, orgs.rows, fresh.orgs.eol), fresh.orgs.text],
+          ['data/programs.csv', CampLib.toCsv(fresh.programs.header, programs.rows, fresh.programs.eol), fresh.programs.text],
+        ].filter(([, content, was]) => content !== was);
+
+        for (const [path, content] of files) {
+          const res = await fetch('/__save_csv', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, content }),
+          });
+          if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new Error(`${path} was not saved (${detail.error || 'HTTP ' + res.status})`);
+          }
+        }
+
+        const skipped = [...programs.missing, ...orgs.missing, ...programs.clashes, ...orgs.clashes];
+        pending = { programs: noChanges(), orgs: noChanges() };
+        isDirty = false;
+        document.getElementById('dirtyBadge').style.display = 'none';
+        if (files.length) localStorage.setItem(AWAITING_BUILD_KEY, CURRENT_STAMP);
+        btn.textContent = files.length ? '✓ Saved to CSV' : 'Nothing to save';
+        setEditing(false);
+        document.getElementById('editInfo').textContent = '';
+        showNotice(
+          (files.length ? 'Saved ' + files.map(f => f[0]).join(' and ') + '. ' : 'The CSV files already held these values; nothing was written. ') +
+          (skipped.length ? `Skipped ${skipped.length} change(s) to rows that are no longer in the files or already exist (${skipped.slice(0, 5).join(', ')}). ` : '') +
+          'Now run python3 scripts/build_data_js.py; the page reloads and editing comes back.');
+        setTimeout(() => { btn.textContent = orig; }, 2500);
+      } catch (e) {
+        showNotice('Save failed: ' + e.message + '. Your edits are still on this page; nothing else was changed. Fix the problem and press Save All again.');
+        flash('✕ Not saved');
+      }
     }
 
     // ===== Modal helpers =====
@@ -1626,6 +1744,7 @@
       buildOrgSelect();
       refreshTypeFilterOptions();
       renderTable();
+      startEditing();
     }
 
     // View toggle
@@ -1656,17 +1775,7 @@
     });
 
     // Duplicate program button
-    document.getElementById('btnDuplicate').addEventListener('click', () => {
-      const entry = readFormIntoObject();
-      entry.id  = Math.max(0, ...campRows.map(p => p.id || 0)) + 1;
-      entry.uid = `prog-${entry.id}`;
-      entry.name = entry.name + ' (Copy)';
-      campRows.push(entry);
-      refreshTypeFilterOptions();
-      markDirty();
-      closeModal('editModal');
-      renderTable();
-    });
+    document.getElementById('btnDuplicate').addEventListener('click', handleDuplicate);
 
     // Form submits
     document.getElementById('editForm').addEventListener('submit', handleSave);

@@ -32,8 +32,10 @@ All program and organization data lives in two CSV files:
 
 | File | Contents |
 | --- | --- |
-| `data/programs.csv` | 401 programs — 391 summer camps, 10 afterschool |
-| `data/organizations.csv` | 148 organizations |
+| `data/programs.csv` | One row per program session: summer camps and afterschool programs |
+| `data/organizations.csv` | One row per organization |
+
+The About and Data pages show the current counts, taken from `data.js` when the page loads.
 
 After editing either CSV, rebuild `data.js`:
 
@@ -60,26 +62,18 @@ New-season listings come in through a small pipeline: a script watches each orga
 | `scripts/infer_org_types.py` | Infer `org_type` from `org_name` keywords |
 | `scripts/normalize_times.py` | Standardize `start_time`/`end_time` to 12-hour format |
 | `scripts/parse_costs.py` | Parse `cost_raw` into a normalized `cost_per_week` value |
-| `scripts/dev_server.py` | Local server with live reload and CSV save endpoint |
+| `scripts/dev_server.py` | Local server (this machine only) with live reload; lets the Admin page save the two data CSVs |
 
 ## Admin editor
 
-Open `http://localhost:8000/admin.html` while running the dev server to edit programs and organizations through a UI.
+A local tool for correcting rows of earlier seasons. It is not part of the public site: the Admin link shows only on `localhost`, and anywhere else the page is read-only.
 
-**Save All** writes directly to `data/programs.csv` and `data/organizations.csv` on disk (requires `dev_server.py` — falls back to browser localStorage if not running). After saving, rebuild `data.js` to propagate changes:
+1. Run `python scripts/dev_server.py` and open `http://127.0.0.1:8000/admin.html`. Editing is on only through this server (plain `python -m http.server` cannot save).
+2. Edit, then click **Save All**. It changes only the cells you edited in `data/programs.csv` and `data/organizations.csv`; every other row and column, including inactive rows, is written back as it was.
+3. Run `python scripts/build_data_js.py`. Editing stays off until you do, because the page lists what is in `data.js`.
+4. Commit `data/programs.csv`, `data/organizations.csv`, and `data.js`.
 
-```bash
-python scripts/build_data_js.py
-```
-
-**Sharing edits with others:**
-
-1. Run `python scripts/dev_server.py`
-2. Edit in the admin → click **Save All** (button confirms "✓ Saved to CSV")
-3. Run `python scripts/build_data_js.py`
-4. Commit `data/programs.csv`, `data/organizations.csv`, and `data.js` — others pull and rebuild
-
-> When Save All writes to CSV it clears localStorage, so the next page load always reflects the latest committed data rather than stale browser state.
+Rows for the season being ingested (2027, from `data/ingest_config.json`) are locked in the Admin page, and it will not add them: `scripts/merge_staging.py` is the only writer of those rows. The `notes` columns are public (they are in this repository and in `data.js`).
 
 ## Data constraints
 
@@ -91,10 +85,10 @@ Use the `TOWNNAMEMC` property in the GeoJSON as the canonical spelling (e.g. `Bu
 ## Contributing
 
 1. Fork the repo and clone it locally
-2. Add or edit rows in `data/programs.csv` or `data/organizations.csv`
+2. To help with 2027 listings, use the site's Volunteer page and the shared Sheet (see "2027 ingestion" above); do not add 2027 rows to the CSVs by hand. To correct an earlier season, edit rows in `data/programs.csv` or `data/organizations.csv`
 3. Run `python scripts/validate_data.py` — fix any ERRORs
 4. Run `python scripts/build_data_js.py` — regenerates `data.js`
-5. Test with `python -m http.server 8000`
+5. Test with `python scripts/dev_server.py`
 6. Submit a pull request
 
 See the [Data docs](https://kefortney.github.io/Camp-and-Afterschool-Care-Finder/data.html) for full field-by-field schema documentation.

@@ -40,15 +40,16 @@
 
     <section class="static-section">
       <h2>Contribute on GitHub</h2>
-      <p>This project is open source and welcomes contributions of all kinds — from adding missing programs to the dataset, to improving the search UI, to fixing bugs and improving documentation.</p>
+      <p>This project is open source and welcomes contributions of all kinds — from checking camp listings against each camp's own page, to improving the search UI, to fixing bugs and improving documentation.</p>
       <a class="link-btn" href="https://github.com/kefortney/Camp-and-Afterschool-Care-Finder" target="_blank" rel="noopener noreferrer">View on GitHub</a>
       <a class="link-btn link-btn-outline" href="https://github.com/kefortney/Camp-and-Afterschool-Care-Finder/issues" target="_blank" rel="noopener noreferrer">Open Issues</a>
       <h3>How to Contribute</h3>
+      <p><strong>Checking camp listings (no coding needed).</strong> Each camp posts its dates and prices on its own web page. The <a href="volunteer.html">Volunteer page</a> lists small tasks, sorted by how long they take. Each task opens a row in our shared Google Sheet, where you compare our draft with the camp's page and mark it right, fixed or gone. A maintainer reads the checked rows and merges them into the site. Please do not add 2027 listings by editing <code>data/programs.csv</code> directly: new-season rows come in only through the Sheet and <code>scripts/merge_staging.py</code>.</p>
+      <p><strong>Code, documentation and corrections to earlier seasons:</strong></p>
       <ol>
         <li><strong>Fork the repository</strong> on GitHub and clone it locally.</li>
-        <li><strong>Add or improve data</strong> — the easiest contribution is researching missing programs and adding rows to <code>data/programs.csv</code> or verifying existing records against current program websites.</li>
-        <li><strong>Run the data pipeline</strong> — after editing CSVs, run <code>python scripts/validate_data.py</code> then <code>python scripts/build_data_js.py</code> to regenerate <code>data.js</code>.</li>
-        <li><strong>Test locally</strong> — run <code>python -m http.server 8000</code> and open <code>http://localhost:8000</code>.</li>
+        <li><strong>Make your change.</strong> If you corrected a row in <code>data/programs.csv</code> or <code>data/organizations.csv</code>, run <code>python3 scripts/validate_data.py</code> then <code>python3 scripts/build_data_js.py</code> to regenerate <code>data.js</code>.</li>
+        <li><strong>Test locally</strong> — run <code>python3 scripts/dev_server.py</code> and open <code>http://127.0.0.1:8000</code>.</li>
         <li><strong>Submit a pull request</strong> with a description of what you added or changed.</li>
       </ol>
       <p>New to open source? Check the Issues board for tickets labeled <strong>good first issue</strong>. All experience levels are welcome.</p>
@@ -56,16 +57,16 @@
 
     <section class="static-section">
       <h2>The Data</h2>
-      <p>All data lives in two CSV files. A Python pipeline validates and joins them into <code>data.js</code>, the module loaded by the app. See the <a href="data.html">Data page</a> for full field-by-field documentation.</p>
+      <p>The site shows two CSV files. A Python script validates and joins them into <code>data.js</code>, the file the pages load. New-season listings are drafted from each organization's own page, checked by volunteers in a shared Google Sheet, and merged in by a maintainer. See the <a href="data.html">Data page</a> for that pipeline and full field-by-field documentation.</p>
 
       <div class="static-card">
         <h3>Programs — <code>data/programs.csv</code></h3>
-        <p>The unified program registry: 401 programs covering 391 summer camps and 10 afterschool programs. Each row is one program session with dates, grades served, hours, cost, location, activities, and a description. After editing, run <code>python scripts/validate_data.py</code> then <code>python scripts/build_data_js.py</code> to regenerate <code>data.js</code>.</p>
+        <p>The unified program registry: <span data-count="programs">…</span> programs on the site, covering <span data-count="camps">…</span> summer camps and <span data-count="afterschool">…</span> afterschool programs. Each row is one program session with dates, grades served, hours, cost, location, activities, and a description.</p>
       </div>
 
       <div class="static-card">
         <h3>Organizations — <code>data/organizations.csv</code></h3>
-        <p>The organization registry: 148 organizations that run programs in the dataset. Provides website, phone, email, address, financial aid availability, and registration policy. Every program row references an <code>org_id</code> that must match a record here — enforced by <code>validate_data.py</code> before building.</p>
+        <p>The organization registry: <span data-count="orgs">…</span> organizations, <span data-count="orgsWithPrograms">…</span> of them with programs listed. Provides website, phone, email, address, financial aid availability, and registration policy. Every program row references an <code>org_id</code> that must match a record here — enforced by <code>validate_data.py</code> before building.</p>
       </div>
     </section>
 
@@ -85,6 +86,19 @@
     <p style="margin-top:0.4rem;">Program information is collected from public sources. Contact programs directly to confirm availability and details.</p>
   </footer>
 
+  <script src="data.js"></script>
+  <script src="lib.js"></script>
+  <script>
+    // Counts come from the data the site is showing, so they cannot go out of date.
+    (function () {
+      if (typeof PROGRAMS === 'undefined' || typeof ORGANIZATIONS === 'undefined') return;
+      const counts = CampLib.dataCounts(PROGRAMS, ORGANIZATIONS);
+      document.querySelectorAll('[data-count]').forEach(el => {
+        const n = counts[el.dataset.count];
+        if (typeof n === 'number') el.textContent = n.toLocaleString('en-US');
+      });
+    })();
+  </script>
   <script>window.NAV_PAGE = 'about';</script>
   <script src="nav.js"></script>
 </body>

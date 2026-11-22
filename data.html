@@ -22,8 +22,15 @@
 
     <section class="static-section">
       <h2>Overview</h2>
-      <p>All data lives in two canonical CSV files — <code>data/programs.csv</code> and <code>data/organizations.csv</code>. A Python pipeline validates and joins them into <code>data.js</code>, the JavaScript module loaded by the app at runtime.</p>
-      <p><strong>Pipeline order:</strong> edit CSVs → <code>python scripts/validate_data.py</code> (check for errors) → <code>python scripts/build_data_js.py</code> (regenerate data.js). Utility scripts like <code>backfill_age_grade.py</code> and <code>fetch_descriptions.py</code> run before validation to fill in missing fields.</p>
+      <p>The site shows two CSV files, <code>data/programs.csv</code> and <code>data/organizations.csv</code>. <code>scripts/build_data_js.py</code> checks them and joins them into <code>data.js</code>, the file the pages load.</p>
+      <p>New-season (2027) listings reach those two files through an ingestion pipeline with its own files:</p>
+      <ul>
+        <li><code>data/sources.csv</code>: one row per organization, with the page to watch and where it stands (<code>status_2027</code>).</li>
+        <li><code>data/staging/2027/</code>: draft rows waiting for review, one file per organization, and <code>_organizations.csv</code> for organization facts such as registration dates.</li>
+        <li>A shared Google Sheet where volunteers check the drafts (see the <a href="volunteer.html">Volunteer page</a>). Its id is in <code>data/ingest_config.json</code>.</li>
+      </ul>
+      <p><strong>Pipeline order for 2027 listings:</strong> <code>scripts/watch_sources.py</code> notices that an organization's page mentions the new season → drafts are written to staging (by the <code>extract-camp-listings</code> Claude Code skill where the site's <code>robots.txt</code> allows it, otherwise typed in by a volunteer) → volunteers compare each draft with the page in the Sheet → the maintainer reads each staging file → <code>scripts/merge_staging.py</code> writes the checked rows into the two CSV files, then runs <code>validate_data.py</code> and <code>build_data_js.py</code>. <code>merge_staging.py</code> is the only script that writes 2027 rows. The maintainer's weekly order is pull, merge, watch, extract, push; the full steps are in <code>docs/ingestion/runbook.md</code>.</p>
+      <p><strong>Correcting an earlier season by hand:</strong> edit the CSV → <code>python3 scripts/validate_data.py</code> (check for errors) → <code>python3 scripts/build_data_js.py</code> (regenerate <code>data.js</code>). Utility scripts like <code>backfill_age_grade.py</code> and <code>fetch_descriptions.py</code> run before validation to fill in missing fields.</p>
       <a class="link-btn" href="https://github.com/kefortney/Camp-and-Afterschool-Care-Finder/tree/main/data" target="_blank" rel="noopener noreferrer">Browse data/ on GitHub</a>
     </section>
 
@@ -33,9 +40,9 @@
       <div class="static-card">
         <h3>data/programs.csv</h3>
         <div class="dataset-meta">
-          <span><strong>Rows:</strong> 401 programs (391 camps, 10 afterschool)</span>
-          <span><strong>Updated:</strong> Annually (spring for camps; fall for afterschool)</span>
-          <span><strong>Source:</strong> Manual research — program websites, direct outreach, Vermont AOE grant data</span>
+          <span><strong>On the site:</strong> <span data-count="programs">…</span> programs (<span data-count="camps">…</span> camps, <span data-count="afterschool">…</span> afterschool), counted from <code>data.js</code>; rows marked <code>inactive</code> are not counted</span>
+          <span><strong>Updated:</strong> 2027 listings: about weekly from mid-December 2026 to mid-March 2027, as organizations post them. Earlier seasons: corrected as needed.</span>
+          <span><strong>Source:</strong> Each organization's own public web pages (listed in <code>data/sources.csv</code>). 2027 rows are drafted from those pages and checked against them by volunteers. 2026 rows came from manual research: program websites, direct outreach, Vermont AOE grant data.</span>
         </div>
         <p>The unified program registry. Each row is one program (one session of one camp, or one afterschool program). Foreign key <code>org_id</code> must match a row in <code>organizations.csv</code> — validated by <code>validate_data.py</code> before building.</p>
         <table class="schema-table">
@@ -43,11 +50,11 @@
             <tr><th>Field</th><th>Type</th><th>Description</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>program_id</code></td><td>string</td><td>Unique program identifier (kebab-case slug, e.g. <code>bgc-burlington-camp-2026-1</code>). Auto-generated; never rename.</td></tr>
-            <tr><td><code>org_id</code></td><td>string (FK)</td><td>Foreign key referencing <code>organizations.csv</code>. Must match an <code>org_id</code> exactly. Use the Admin dropdown — never type free text.</td></tr>
+            <tr><td><code>program_id</code></td><td>string</td><td>Unique program identifier: <code>&lt;org_id&gt;-&lt;name-slug&gt;-&lt;season&gt;</code> in kebab-case, e.g. <code>catamount-outdoor-family-centers-mtb-camp-week-1-2026</code>, with <code>-2</code>, <code>-3</code>… added when the id is taken. Assigned when a row is drafted; never rename.</td></tr>
+            <tr><td><code>org_id</code></td><td>string (FK)</td><td>Foreign key referencing <code>organizations.csv</code>. Must match an <code>org_id</code> exactly; <code>validate_data.py</code> rejects an id that is not there.</td></tr>
             <tr><td><code>program_name</code></td><td>string</td><td>Full display name of the program or session.</td></tr>
             <tr><td><code>program_type</code></td><td>enum</td><td><code>camp</code> or <code>afterschool</code>.</td></tr>
-            <tr><td><code>program_year</code></td><td>integer</td><td>Program year (e.g. 2026).</td></tr>
+            <tr><td><code>program_year</code></td><td>integer</td><td>The season the row belongs to (e.g. 2027). <code>merge_staging.py</code> sets it to the season in <code>data/ingest_config.json</code> on every row it merges. An organization's older-season rows are hidden by default once it has rows for a later season.</td></tr>
             <tr><td><code>description</code></td><td>text</td><td>Description of the program. May be auto-fetched via <code>scripts/fetch_descriptions.py</code>.</td></tr>
             <tr><td><code>session_type</code></td><td>enum</td><td><code>day</code>, <code>residential</code>, <code>hybrid</code>, or <code>drop-in</code>.</td></tr>
             <tr><td><code>schedule_type</code></td><td>enum</td><td><code>seasonal</code>, <code>weekly</code>, <code>daily</code>, or <code>year-round</code>.</td></tr>
@@ -62,7 +69,7 @@
             <tr><td><code>end_time</code></td><td>string (HH:MM AM/PM)</td><td>Daily end time.</td></tr>
             <tr><td><code>pre_after_care</code></td><td>string</td><td>Extended care availability (before/after hours).</td></tr>
             <tr><td><code>cost_raw</code></td><td>string</td><td>Cost as listed by the provider — raw, unnormalized.</td></tr>
-            <tr><td><code>cost_per_week</code></td><td>numeric</td><td>Normalized weekly cost in dollars. 0 = free or unknown.</td></tr>
+            <tr><td><code>cost_per_week</code></td><td>numeric</td><td>Normalized weekly cost in dollars. 0 = free; blank = not known.</td></tr>
             <tr><td><code>cost_notes</code></td><td>string</td><td>Sliding scale, sibling discounts, or other cost notes.</td></tr>
             <tr><td><code>meals_provided</code></td><td>boolean</td><td>TRUE if meals are included.</td></tr>
             <tr><td><code>transportation_provided</code></td><td>boolean</td><td>TRUE if transportation is available.</td></tr>
@@ -78,7 +85,7 @@
             <tr><td><code>funding_source</code></td><td>string</td><td>Funding mechanism (e.g., "21st Century Community Learning Centers" for free afterschool programs).</td></tr>
             <tr><td><code>confidence</code></td><td>enum</td><td><code>confirmed</code>, <code>likely</code>, or <code>inactive</code>. Programs with <code>inactive</code> are excluded from the public site.</td></tr>
             <tr><td><code>verified_date</code></td><td>date (YYYY-MM-DD)</td><td>When the data was last verified against the source.</td></tr>
-            <tr><td><code>notes</code></td><td>text</td><td>Internal notes; not shown publicly. Use for data quality reminders, follow-up items, or anything that doesn't fit other fields.</td></tr>
+            <tr><td><code>notes</code></td><td>text</td><td>Maintainer notes. <strong>Public:</strong> the pages do not display them, but they are published in this repository and in <code>data.js</code>, so write nothing private here. Use for data quality reminders and follow-up items.</td></tr>
           </tbody>
         </table>
       </div>
@@ -90,9 +97,9 @@
       <div class="static-card">
         <h3>data/organizations.csv</h3>
         <div class="dataset-meta">
-          <span><strong>Rows:</strong> 148 organizations</span>
+          <span><strong>On the site:</strong> <span data-count="orgs">…</span> organizations, <span data-count="orgsWithPrograms">…</span> of them with programs listed (counted from <code>data.js</code>)</span>
           <span><strong>Updated:</strong> As needed</span>
-          <span><strong>Source:</strong> Compiled from program websites and direct outreach</span>
+          <span><strong>Source:</strong> Compiled from program websites and direct outreach. Registration dates, financial aid and website are updated by <code>merge_staging.py</code> from facts volunteers check against the organization's page.</span>
         </div>
         <p>The organization registry. Every <code>org_id</code> referenced in <code>programs.csv</code> must exist here. Organization contact info (phone, email, website) is merged into program records at build time and shown in the detail modal.</p>
         <table class="schema-table">
@@ -114,10 +121,12 @@
             <tr><td><code>financial_aid_available</code></td><td>boolean</td><td>TRUE if the organization offers any financial assistance.</td></tr>
             <tr><td><code>financial_aid_notes</code></td><td>text</td><td>Details on sliding scale, subsidies, or scholarship processes.</td></tr>
             <tr><td><code>registration_policy</code></td><td>string</td><td>Notes on registration approach (e.g., "First-come first-served").</td></tr>
-            <tr><td><code>registration_opens</code></td><td>string</td><td>When registration typically opens each year.</td></tr>
+            <tr><td><code>registration_opens</code></td><td>date (YYYY-MM-DD)</td><td>The day general registration opens for the coming season. Shown in the "Registration opening soon" list on the Camps page. <code>validate_data.py</code> rejects anything that is not a real date.</td></tr>
+            <tr><td><code>registration_opens_early</code></td><td>date (YYYY-MM-DD)</td><td>Optional earlier day for a priority group (members, residents, returning campers). Must not be after <code>registration_opens</code>.</td></tr>
+            <tr><td><code>registration_notes</code></td><td>text</td><td>Short public note shown beside the dates, e.g. who the early date is for or that places are given by lottery.</td></tr>
             <tr><td><code>confidence</code></td><td>enum</td><td><code>confirmed</code>, <code>likely</code>, or <code>inactive</code>.</td></tr>
             <tr><td><code>verified_date</code></td><td>date (YYYY-MM-DD)</td><td>When org data was last confirmed.</td></tr>
-            <tr><td><code>notes</code></td><td>text</td><td>Internal notes; not shown in the UI.</td></tr>
+            <tr><td><code>notes</code></td><td>text</td><td>Maintainer notes. <strong>Public:</strong> the pages do not display them, but they are published in this repository and in <code>data.js</code>.</td></tr>
           </tbody>
         </table>
       </div>
@@ -150,41 +159,63 @@
     <!-- ===== Data Pipeline ===== -->
     <section class="static-section">
       <h2>Data Pipeline Scripts</h2>
-      <p>All scripts live in <code>scripts/</code> and operate on CSVs in <code>data/</code>. Run from the project root.</p>
+      <p>All scripts live in <code>scripts/</code> and are run from the project root. <code>scripts/README.md</code> lists every script, including the smaller enrichment ones not described here.</p>
 
+      <h3>Check and build</h3>
       <div class="static-card">
         <h3>scripts/validate_data.py</h3>
-        <p>Validates <code>programs.csv</code> and <code>organizations.csv</code> for foreign key integrity, required fields, and enum values. Exit code 0 = pass; exit code 1 = errors that block the build. Run this before <code>build_data_js.py</code>.</p>
+        <p>Validates <code>programs.csv</code> and <code>organizations.csv</code> for foreign key integrity, required fields, enum values and registration dates. Exit code 0 = pass; exit code 1 = errors that block the build.</p>
       </div>
-
       <div class="static-card">
         <h3>scripts/build_data_js.py</h3>
-        <p>Runs <code>validate_data.py</code> first (aborts on errors), then joins <code>programs.csv</code> + <code>organizations.csv</code> and writes <code>data.js</code> — the JavaScript module loaded by the app. <strong>Run this after editing any CSV.</strong></p>
+        <p>Runs <code>validate_data.py</code> first (aborts on errors), then joins <code>programs.csv</code> + <code>organizations.csv</code> and writes <code>data.js</code>. Rows marked <code>inactive</code> are left out. <strong>Run this after editing either CSV by hand</strong>; <code>merge_staging.py</code> runs it for you.</p>
       </div>
 
+      <h3>2027 ingestion</h3>
+      <p>Run in the order given in <code>docs/ingestion/runbook.md</code>. None of these scripts run <code>git</code> or write to the Google Sheet.</p>
+      <div class="static-card">
+        <h3>scripts/sources.py</h3>
+        <p>Maintains <code>data/sources.csv</code>, the list of pages to watch. <code>seed</code> adds a row for each organization not yet listed; <code>robots</code> records whether each site's <code>robots.txt</code> turns AI crawlers away; <code>check</code> lists problems in the file.</p>
+      </div>
+      <div class="static-card">
+        <h3>scripts/watch_sources.py</h3>
+        <p>Fetches each <code>html</code> and <code>pdf</code> source not checked in the last 6 days, one request every two seconds. Sets <code>status_2027</code> to <code>posted</code> when a page mentions the season and its text is new, and to <code>changed</code> when an already merged page changes. Sources of kind <code>rec1</code>, <code>gated</code> and <code>manual</code> are never fetched; the maintainer checks those by hand.</p>
+      </div>
+      <div class="static-card">
+        <h3>scripts/staging.py</h3>
+        <p>The staging area, <code>data/staging/&lt;season&gt;/&lt;org_id&gt;.csv</code>. <code>add</code> and <code>add-org</code> stage draft rows and organization facts from a JSON file (used by the <code>extract-camp-listings</code> skill); <code>check</code> validates them.</p>
+      </div>
+      <div class="static-card">
+        <h3>scripts/sheet_sync.py</h3>
+        <p>Connects staging with the volunteer Google Sheet. <code>pull</code> downloads the Tasks, Drafts and Orgs tabs through the Sheet's public CSV export, stages the tasks volunteers finished, and writes a copy of the task list with names and notes removed for the Volunteer page. <code>push</code> writes files of new rows and a list of cell changes that the maintainer imports into the Sheet by hand; no script writes to the Sheet. <code>init</code> writes the header rows for a new Sheet.</p>
+      </div>
+      <div class="static-card">
+        <h3>scripts/merge_staging.py</h3>
+        <p>Writes reviewed staging rows into <code>programs.csv</code> and <code>organizations.csv</code> (<code>--all-ready</code>, <code>--org ORG_ID</code>, or <code>--org-facts ORG_ID</code> for registration dates alone). Sets <code>program_year</code> to the season and <code>confidence</code> to <code>confirmed</code>, turns a row reviewed as <code>delete</code> into <code>inactive</code>, refuses to change a row of another season, runs the validator and the build, and puts both CSVs back if either fails.</p>
+      </div>
+
+      <h3>Filling in fields</h3>
       <div class="static-card">
         <h3>scripts/backfill_age_grade.py</h3>
         <p>Fills missing <code>grades_min</code>/<code>grades_max</code> from <code>age_min</code>/<code>age_max</code> (and vice versa) in <code>programs.csv</code> using <code>data/age_to_grade.csv</code>. Run before <code>build_data_js.py</code> when adding programs with only age or only grade data.</p>
       </div>
-
       <div class="static-card">
         <h3>scripts/enrich_locations.py</h3>
         <p>Geocodes and standardizes <code>site_address</code> in <code>programs.csv</code> by querying the OpenStreetMap Nominatim API. Fills in missing addresses and normalizes format to "Street, City, VT ZIP".</p>
       </div>
-
       <div class="static-card">
         <h3>scripts/fetch_descriptions.py</h3>
         <p>Fetches program descriptions from <code>registration_url</code> for rows with a blank <code>description</code> in <code>programs.csv</code>. Extracts the <code>&lt;meta name="description"&gt;</code> tag or first paragraph from each URL. Saves progress every 25 rows.</p>
       </div>
-
       <div class="static-card">
         <h3>scripts/normalize_times.py</h3>
         <p>Standardizes <code>start_time</code> and <code>end_time</code> strings in <code>programs.csv</code> to 12-hour format (HH:MM AM/PM), handling inconsistent inputs like "9am", "09:00", "9:00 AM", etc.</p>
       </div>
 
+      <h3>Local server</h3>
       <div class="static-card">
         <h3>scripts/dev_server.py</h3>
-        <p>Local development server. Serves static files and supports saving CSV edits from the Admin page via a <code>POST /__save_csv</code> endpoint. Run with <code>python scripts/dev_server.py</code> then open <code>http://127.0.0.1:8000</code>.</p>
+        <p>Local development server with live reload: <code>python3 scripts/dev_server.py</code>, then open <code>http://127.0.0.1:8000</code>. It runs only on your own machine. It also lets the Admin page (<code>admin.html</code>, a local tool that is not part of the public site) save edits to rows of earlier seasons through <code>POST /__save_csv</code>, which writes only <code>data/programs.csv</code> and <code>data/organizations.csv</code>.</p>
       </div>
     </section>
 
@@ -195,6 +226,19 @@
     <p style="margin-top:0.4rem;"><a href="https://github.com/kefortney/Camp-and-Afterschool-Care-Finder" target="_blank" rel="noopener noreferrer">GitHub Repository</a></p>
   </footer>
 
+  <script src="data.js"></script>
+  <script src="lib.js"></script>
+  <script>
+    // Counts come from the data the site is showing, so they cannot go out of date.
+    (function () {
+      if (typeof PROGRAMS === 'undefined' || typeof ORGANIZATIONS === 'undefined') return;
+      const counts = CampLib.dataCounts(PROGRAMS, ORGANIZATIONS);
+      document.querySelectorAll('[data-count]').forEach(el => {
+        const n = counts[el.dataset.count];
+        if (typeof n === 'number') el.textContent = n.toLocaleString('en-US');
+      });
+    })();
+  </script>
   <script>window.NAV_PAGE = 'data';</script>
   <script src="nav.js"></script>
 </body>
