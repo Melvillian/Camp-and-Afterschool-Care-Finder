@@ -70,6 +70,15 @@
       '/edit#gid=' + encodeURIComponent(config.tasks_gid) + '&range=A' + Number(row);
   }
 
+  // The How to tab holds the full instructions. The link is built only from the config.
+  function linkHowTo(config) {
+    const link = el('howToLink');
+    if (!link || !/^\d+$/.test(String(config.how_to_gid))) return;
+    link.href = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(config.sheet_id) + '/edit#gid=' + config.how_to_gid;
+    link.target = '_blank';
+    link.rel = 'noopener';
+  }
+
   function taskHtml(task, config) {
     const name = L.escapeHtml(task.org_name);
     const due = L.validIso(task.due) ? '<span class="task-due">Expected around ' + L.escapeHtml(shortDate(task.due)) + '</span>' : '';
@@ -120,6 +129,7 @@
       el('boardMessage').textContent = "The task board's settings could not be loaded.";
       return;
     }
+    linkHowTo(config);
     const wantSnapshot = new URLSearchParams(location.search).get('source') === 'snapshot';
     const live = wantSnapshot ? null : await loadLive(config);
     if (live) return render(config, live, null);

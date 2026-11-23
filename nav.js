@@ -4,7 +4,6 @@
     { label: 'Afterschool', href: 'afterschool.html',  key: 'afterschool' },
     { label: 'About',       href: 'about.html',        key: 'about' },
     { label: 'Data',        href: 'data.html',         key: 'data' },
-    { label: 'Hackathon',   href: 'hackathon.html',    key: 'hackathon' },
     { label: 'Volunteer',   href: 'volunteer.html',    key: 'volunteer' },
   ];
 
