@@ -182,3 +182,198 @@ test('boardTasks names tasks from the site data and drops unknown organizations'
   assert.equal(tasks[0].org_name, '<i>Typed</i>');
   assert.deepEqual(boardTasks(tasks, undefined), []);
 });
+
+// ----- calendar, counts, and the Admin page's CSV editing -----
+const fs = require('node:fs');
+const path = require('node:path');
+const { calendarStart, dataCounts, parseCsvTable, toCsv, applyTableChanges, newProgramId, adminProgramYear,
+  adminMayEdit, seasonRowChanges, programFormPatch, orgFormPatch } = require('../../lib.js');
+
+test('calendarStart: first month with programs still to come', () => {
+  const programs = [
+    { startDate: '2026-06-22', endDate: '2026-06-26' },
+    { startDate: '2027-07-05', endDate: '2027-07-09' },
+    { startDate: '2027-06-21', endDate: '2027-06-25' },
+    { startDate: '', endDate: '' },
+  ];
+  assert.deepEqual(calendarStart(programs, '2026-11-22'), { year: 2027, month: 5 });
+});
+test('calendarStart: mid-season it opens on the current month, not an earlier one', () => {
+  const programs = [{ startDate: '2027-06-21', endDate: '2027-08-13' }, { startDate: '2027-08-02', endDate: '2027-08-06' }];
+  assert.deepEqual(calendarStart(programs, '2027-07-15'), { year: 2027, month: 6 });
+});
+test('calendarStart: when everything is over, the first month of the latest year with dates', () => {
+  const programs = [
+    { startDate: '2025-06-16', endDate: '2025-06-20', programYear: '2026' },
+    { startDate: '2026-07-06', endDate: '2026-07-10' },
+    { startDate: '2026-06-22', endDate: '2026-06-26' },
+    { startDate: '6/1/2026', endDate: '' },
+  ];
+  assert.deepEqual(calendarStart(programs, '2026-11-22'), { year: 2026, month: 5 });
+});
+test('calendarStart: no dated programs gives the current month', () => {
+  assert.deepEqual(calendarStart([{ startDate: '' }, {}], '2026-11-22'), { year: 2026, month: 10 });
+  assert.deepEqual(calendarStart([], '2027-01-03'), { year: 2027, month: 0 });
+});
+
+test('dataCounts counts programs by type and organizations with programs', () => {
+  const programs = [{ category: 'camp', orgId: 'a' }, { category: 'camp', orgId: 'a' }, { category: 'afterschool', orgId: 'b' }];
+  const orgs = [{ orgId: 'a' }, { orgId: 'b' }, { orgId: 'c' }];
+  assert.deepEqual(dataCounts(programs, orgs), { programs: 3, camps: 2, afterschool: 1, orgs: 3, orgsWithPrograms: 2 });
+});
+
+const DATA = path.join(__dirname, '..', '..', 'data');
+const realCsv = name => fs.readFileSync(path.join(DATA, name), 'utf8');
+const resave = (text, idCol, changes) => {
+  const table = parseCsvTable(text);
+  return toCsv(table.header, applyTableChanges(table, idCol, changes).rows, table.eol);
+};
+
+test('Admin save with no edits leaves the real CSV files byte for byte the same', () => {
+  for (const [name, idCol] of [['programs.csv', 'program_id'], ['organizations.csv', 'org_id']]) {
+    const text = realCsv(name);
+    assert.ok(parseCsvTable(text).rows.length > 100, name);
+    assert.equal(resave(text, idCol, {}), text, name);
+    assert.equal(resave(text, idCol, { edits: {}, deleted: [], added: [] }), text, name);
+  }
+});
+
+test('parseCsvTable and toCsv keep quoting, line endings, blank cells and unknown columns', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const text = ['id,name,extra,notes', '1,"Smith, Jo","say ""hi""",', '2,  padded  ,,"two', 'lines"', '3,,,'].join(eol) + eol;
+    const table = parseCsvTable(text);
+    assert.equal(table.eol, eol);
+    assert.deepEqual(table.header, ['id', 'name', 'extra', 'notes']);
+    assert.equal(table.rows[0].name, 'Smith, Jo');
+    assert.equal(table.rows[0].extra, 'say "hi"');
+    assert.equal(table.rows[1].name, '  padded  ');
+    assert.equal(table.rows[1].notes, 'two' + eol + 'lines');
+    assert.equal(toCsv(table.header, table.rows, table.eol), text);
+  }
+});
+
+test('applyTableChanges changes only the named cells and keeps every other row', () => {
+  const text = realCsv('programs.csv');
+  const table = parseCsvTable(text);
+  const [first, second, third] = table.rows.map(r => r.program_id);
+  const out = applyTableChanges(table, 'program_id', {
+    edits: { [first]: { cost_per_week: '300', not_a_column: 'x' } },
+    deleted: [second],
+    added: [{ program_id: 'new-row-2026', org_id: table.rows[0].org_id, program_name: 'New, "quoted"', stray: 'x' }],
+  });
+  assert.equal(out.rows.length, table.rows.length);
+  assert.deepEqual(out.missing, []);
+  assert.deepEqual(out.clashes, []);
+  assert.deepEqual(out.rows[0], { ...table.rows[0], cost_per_week: '300' });
+  assert.equal(out.rows[1], table.rows[2]);
+  assert.equal(out.rows[1].program_id, third);
+  const added = out.rows[out.rows.length - 1];
+  assert.deepEqual(Object.keys(added), table.header);
+  assert.equal(added.program_name, 'New, "quoted"');
+  assert.equal(added.notes, '');
+  // Everything else in the file is unchanged: undo the three changes and the text is the original.
+  const back = parseCsvTable(toCsv(table.header, out.rows, table.eol));
+  back.rows.pop();
+  back.rows[0].cost_per_week = table.rows[0].cost_per_week;
+  back.rows.splice(1, 0, table.rows[1]);
+  assert.equal(toCsv(back.header, back.rows, back.eol), text);
+});
+
+test('applyTableChanges keeps rows the page never listed, and reports ids it cannot find', () => {
+  const table = parseCsvTable('program_id,confidence,cost_notes\na,inactive,kept\nb,confirmed,"aid, on request"\n');
+  const out = applyTableChanges(table, 'program_id', {
+    edits: { b: { confidence: 'likely' }, gone: { confidence: 'likely' } }, deleted: ['also-gone'], added: [{ program_id: 'a' }],
+  });
+  assert.deepEqual(out.rows, [{ program_id: 'a', confidence: 'inactive', cost_notes: 'kept' },
+    { program_id: 'b', confidence: 'likely', cost_notes: 'aid, on request' }]);
+  assert.deepEqual(out.missing.sort(), ['also-gone', 'gone']);
+  assert.deepEqual(out.clashes, ['a']);
+});
+
+const FORM = {
+  name: 'Art Camp', orgId: 'org-a', category: 'camp', sessionType: 'day', scheduleType: 'weekly', confidence: 'confirmed',
+  address: '1 Main St', city: 'Burlington', county: 'Chittenden', registrationUrl: '', gradesMin: 'K', gradesMax: '5',
+  ageMin: '5', ageMax: '11', startDate: '2026-07-06', endDate: '2026-07-10', hours: '09:00 AM – 03:00 PM',
+  daysOffered: 'Mon–Fri', cost: '250', costPeriod: 'week', transportation: false, mealsProvided: false,
+  registrationOpens: '', registrationOpensEarly: '', registrationNotes: '', notes: '',
+  description: 'Org A offers Art Camp in Burlington, VT.', subjects: ['Arts'],
+};
+
+test('programFormPatch: a form saved untouched changes nothing', () => {
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, subjects: ['Arts'] }, 'Arts, Elementary'), {});
+});
+test('programFormPatch: only the fields that changed become cells', () => {
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, sessionType: 'residential', scheduleType: 'seasonal' }, ''),
+    { session_type: 'residential', schedule_type: 'seasonal' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, name: 'Art Camp II', ageMax: '' }, ''), { program_name: 'Art Camp II', age_max: '' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, hours: '8:30 AM - 4 PM' }, ''), { start_time: '8:30 AM', end_time: '4 PM' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, hours: '9am' }, ''), { start_time: '9am', end_time: '' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, cost: '60', costPeriod: 'day' }, ''), { cost_raw: '$60/day', cost_per_week: '' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, cost: '300' }, ''), { cost_raw: '$300/week', cost_per_week: '300' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, cost: '' }, ''), { cost_raw: '', cost_per_week: '' });
+  assert.deepEqual(programFormPatch({ ...FORM, cost: '' }, { ...FORM, cost: '', costPeriod: 'day' }, ''), {});
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, mealsProvided: true }, ''), { meals_provided: 'TRUE' });
+  assert.deepEqual(programFormPatch({ ...FORM, transportation: true }, FORM, ''), { transportation_provided: 'FALSE' });
+});
+test('programFormPatch: activity tags without a checkbox are kept', () => {
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, subjects: ['Arts', 'Music'] }, 'Arts, Elementary, 21CCLC'),
+    { activities: 'Arts, Elementary, 21CCLC, Music' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, subjects: ['Music'] }, 'Elementary,Arts'), { activities: 'Elementary,Music' });
+  assert.deepEqual(programFormPatch(FORM, { ...FORM, subjects: [] }, 'Arts'), { activities: '' });
+});
+test('programFormPatch: a new row gets every field, with blanks for what was not given', () => {
+  const patch = programFormPatch({}, { ...FORM, cost: '', hours: '', subjects: [] }, '');
+  assert.equal(patch.session_type, 'day');
+  assert.equal(patch.schedule_type, 'weekly');
+  assert.equal(patch.program_type, 'camp');
+  assert.equal(patch.confidence, 'confirmed');
+  assert.equal(patch.meals_provided, '');
+  assert.equal(patch.transportation_provided, '');
+  assert.equal(patch.start_time, '');
+  assert.ok(!('cost_raw' in patch) && !('activities' in patch) && !('cost_notes' in patch) && !('funding_source' in patch));
+});
+
+test('orgFormPatch: untouched changes nothing; edits become cells', () => {
+  const form = { orgId: 'org-a', name: 'Org A', type: 'nonprofit', confidence: 'likely', phone: '', email: '', website: '',
+    address: '', city: 'Burlington', county: 'Chittenden', state: 'VT', zip: '', financialAidAvailable: false,
+    financialAidNotes: '', registrationOpens: '', registrationOpensEarly: '', registrationNotes: '', notes: '' };
+  assert.deepEqual(orgFormPatch(form, { ...form }), {});
+  assert.deepEqual(orgFormPatch(form, { ...form, financialAidAvailable: true, registrationOpens: '2027-02-04' }),
+    { financial_aid_available: 'TRUE', registration_opens: '2027-02-04' });
+  assert.equal(orgFormPatch({}, form).org_id, 'org-a');
+  assert.equal(orgFormPatch({}, form).financial_aid_available, '');
+});
+
+test('newProgramId follows scripts/staging.py', () => {
+  assert.equal(newProgramId('org-a', 'Art Camp: Week 1!', 2026, new Set()), 'org-a-art-camp-week-1-2026');
+  assert.equal(newProgramId('org-a', 'Art Camp', 2026, new Set(['org-a-art-camp-2026', 'org-a-art-camp-2026-2'])), 'org-a-art-camp-2026-3');
+  assert.equal(newProgramId('org-a', '!!!', 2026, new Set()), 'org-a-program-2026');
+  assert.equal(newProgramId('o', 'x'.repeat(49) + ' yz', 2026, new Set()), 'o-' + 'x'.repeat(49) + '-2026');
+});
+
+test('adminProgramYear: from the dates, never the ingestion season', () => {
+  assert.equal(adminProgramYear('2026-07-06', '2026-07-10', 2027), 2026);
+  assert.equal(adminProgramYear('2025-07-06', '', 2027), 2025);
+  assert.equal(adminProgramYear('', '', 2027), 2026);
+  assert.equal(adminProgramYear('2027-07-05', '2027-07-09', 2027), null);
+  assert.equal(adminProgramYear('2026-12-28', '2027-01-02', 2027), null);
+  assert.equal(adminProgramYear('2028-07-05', '', 2027), null);
+  assert.equal(adminProgramYear('2026-07-06', '', undefined), null);
+});
+test('adminMayEdit: only rows of seasons before the one being ingested', () => {
+  assert.equal(adminMayEdit('2026', 2027), true);
+  assert.equal(adminMayEdit(2025, '2027'), true);
+  assert.equal(adminMayEdit('2027', 2027), false);
+  assert.equal(adminMayEdit('2028', 2027), false);
+  assert.equal(adminMayEdit('', 2027), false);
+  assert.equal(adminMayEdit('2026', null), false);
+});
+test('seasonRowChanges names season rows that were changed, removed or added', () => {
+  const before = [{ program_id: 'old', program_year: '2026', notes: '' }, { program_id: 'a', program_year: '2027', notes: '' },
+    { program_id: 'b', program_year: '2027', notes: '' }, { program_id: 'c', program_year: '2027', notes: '' }];
+  assert.deepEqual(seasonRowChanges(before, before.map(r => ({ ...r })), 2027), []);
+  assert.deepEqual(seasonRowChanges(before, [{ program_id: 'old', program_year: '2026', notes: 'edited' }, ...before.slice(1)], 2027), []);
+  const after = [before[0], { ...before[1], notes: 'x' }, before[3], { program_id: 'd', program_year: '2027', notes: '' }];
+  assert.deepEqual(seasonRowChanges(before, after, 2027).sort(), ['a', 'b', 'd']);
+  assert.deepEqual(seasonRowChanges(before, [{ ...before[0], program_year: '2027' }, ...before.slice(1)], 2027), ['old']);
+});

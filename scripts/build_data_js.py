@@ -332,8 +332,6 @@ def build_program_obj(prog: dict, org: dict, uid: int) -> dict:
         "acceptingRegistration": accepting,
         "startDate":            normalize_date(prog.get("start_date", "")),
         "endDate":              normalize_date(prog.get("end_date", "")),
-        "starsLevel":           org.get("stars_rating", ""),
-        "referralStatus":       "Active" if accepting else "Inactive",
         "providerProgramType":  type_label,
         "programType":          prog_type,
         "confidence":           prog.get("confidence", "confirmed"),

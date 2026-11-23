@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Local dev server with lightweight live-reload for static files.
 
+It also lets the Admin page save data/programs.csv and data/organizations.csv
+(POST /__save_csv), so it binds only to this machine.
+
 Run from project root:
     python scripts/dev_server.py
 
@@ -24,6 +27,39 @@ from urllib.parse import urlparse
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WATCH_EXTENSIONS = {".html", ".css", ".js", ".json", ".csv"}
 POLL_INTERVAL_SECONDS = 1.0
+
+# /__save_csv writes files, so it is limited to these two paths and to requests
+# that come from a page this server served on this machine.
+SAVE_ALLOWLIST = frozenset({"data/programs.csv", "data/organizations.csv"})
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1"})
+
+
+def _is_local(netloc: str, port: int, default_port: int = 80) -> bool:
+    """True when `netloc` ("host" or "host:port") is a loopback name on `port`."""
+    host, sep, port_text = (netloc or "").strip().lower().rpartition(":")
+    if not sep:
+        host, port_text = port_text, str(default_port)
+    return host in LOOPBACK_HOSTS and port_text == str(port)
+
+
+def save_refusal(headers, port: int) -> str:
+    """Why a /__save_csv request must be refused, or "" when it may go ahead.
+
+    Host must be this server (stops DNS rebinding), Origin, when sent, must be
+    this server (stops other sites' pages posting here), and the body must be
+    declared as JSON (a cross-site form or no-cors fetch cannot send that).
+    """
+    if not _is_local(headers.get("Host", ""), port):
+        return "Host is not this local server"
+    origin = headers.get("Origin")
+    if origin is not None:
+        parts = urlparse(origin)
+        if parts.scheme != "http" or not _is_local(parts.netloc, port):
+            return "Origin is not this local server"
+    content_type = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if content_type != "application/json":
+        return "Content-Type must be application/json"
+    return ""
 
 
 LIVE_RELOAD_SNIPPET = """
@@ -131,58 +167,54 @@ class LiveReloadHandler(SimpleHTTPRequestHandler):
 
         return super().do_GET()
 
+    def _send_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
 
-        if parsed.path == "/__save_csv":
-            content_length = int(
-                self.headers.get("Content-Length", 0)
-            )
-            body = self.rfile.read(content_length).decode("utf-8")
-
-            try:
-                data = json.loads(body)
-                file_path = data.get("path", "")
-                csv_content = data.get("content", "")
-
-                # Prevent path traversal attacks
-                if ".." in file_path or file_path.startswith("/"):
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(
-                        json.dumps(
-                            {"error": "Invalid path"}
-                        ).encode("utf-8")
-                    )
-                    return
-
-                # Resolve path relative to project root
-                target_path = Path(self.directory) / file_path
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                target_path.write_text(csv_content, encoding="utf-8")
-
-                response = json.dumps(
-                    {"success": True}
-                ).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(response)))
-                self.end_headers()
-                self.wfile.write(response)
-            except (json.JSONDecodeError, KeyError, OSError) as e:
-                error_msg = json.dumps(
-                    {"error": str(e)}
-                ).encode("utf-8")
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(error_msg)))
-                self.end_headers()
-                self.wfile.write(error_msg)
+        if parsed.path != "/__save_csv":
+            self.send_response(404)
+            self.end_headers()
             return
 
-        self.send_response(404)
-        self.end_headers()
+        refusal = save_refusal(self.headers, self.server.server_address[1])
+        if refusal:
+            self._send_json(403, {"error": refusal})
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            data = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            file_path = data.get("path") if isinstance(data, dict) else None
+            csv_content = data.get("content") if isinstance(data, dict) else None
+        except (ValueError, UnicodeDecodeError) as e:
+            self._send_json(400, {"error": str(e)})
+            return
+
+        # Only the two data files the Admin page edits may be written.
+        if not isinstance(file_path, str) or file_path not in SAVE_ALLOWLIST:
+            self._send_json(400, {"error": "Invalid path"})
+            return
+        if not isinstance(csv_content, str) or not csv_content.strip():
+            self._send_json(400, {"error": "content must be non-empty text"})
+            return
+
+        try:
+            target_path = Path(self.directory) / file_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            # newline="" keeps the line endings exactly as sent.
+            with open(target_path, "w", encoding="utf-8", newline="") as f:
+                f.write(csv_content)
+        except OSError as e:
+            self._send_json(500, {"error": str(e)})
+            return
+        self._send_json(200, {"success": True})
 
     def send_head(self):
         parsed = urlparse(self.path)
@@ -223,12 +255,14 @@ class LiveReloadHandler(SimpleHTTPRequestHandler):
         return super().send_head()
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Static dev server with live reload"
     )
     parser.add_argument(
-        "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)"
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind: 127.0.0.1 (default) or localhost",
     )
     parser.add_argument(
         "--port", type=int, default=8000, help="Port to bind (default: 8000)"
@@ -242,7 +276,14 @@ def parse_args() -> argparse.Namespace:
             f"(default: {POLL_INTERVAL_SECONDS})"
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.host not in LOOPBACK_HOSTS:
+        # The server can write the data files, so it never listens beyond this machine.
+        parser.error(
+            f"--host must be one of {sorted(LOOPBACK_HOSTS)}; "
+            "this server can write data files and is for local use only"
+        )
+    return args
 
 
 def main() -> None:
