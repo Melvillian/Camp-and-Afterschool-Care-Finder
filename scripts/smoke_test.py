@@ -164,6 +164,8 @@ def main():
             check("board: groups", all(h in dom for h in ("5 minutes or less", "6 to 15 minutes", "More than 15 minutes")))
             check("board: progress", "0 of 4 tasks done · 1 in progress" in dom)
             check("board: snapshot note", "Showing the last saved copy. Saved Jan 12." in dom)
+            check("board: How to link goes to the How to tab", 'id="howToLink" href="https://docs.google.com/spreadsheets/d/' in dom and "/edit#gid=80728566" in dom)
+            check("nav: no Hackathon link", 'href="hackathon.html"' not in dom)
             check("board: sheet link", "edit#gid=0&amp;range=A2" in dom or "edit#gid=0&range=A2" in dom)
             check("board: link keeps its row after a blank row", "range=A4" in dom.replace("&amp;", "&") and "range=A3" not in dom.replace("&amp;", "&"))
             board = dom.split('id="board"', 1)[-1].split('id="howItWorks"', 1)[0]

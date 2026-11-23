@@ -270,7 +270,7 @@ It writes four files to `data/staging/2027/sheet/_init/` (git-ignored): `tasks_h
 4. **How to tab.** Open `how_to.txt`, copy it all, double-click cell A1 of the How to tab so the cell is in edit mode, and paste. If the text spreads over many rows instead, undo and try again from edit mode.
 5. Run `python3 scripts/sheet_sync.py push` and import the `_to_paste` files as in step 1.6. The first push on the real data makes 12 `find_page` tasks (one per source with no page or a broken one).
 6. **Share it.** "Anyone with the link" is a **Viewer**, and each volunteer is added as an Editor by their Google account email (part 6). The Sheet must always stay viewable by anyone with the link, or `pull` and the Volunteer page stop working.
-7. **Find the Tasks tab's gid.** Click the Tasks tab and look at the address bar: `.../edit#gid=123456789`. The number after `gid=` is the gid. Put it in `data/ingest_config.json` as `"tasks_gid": "123456789"` (keep the quotes). It is `"0"` now, which is right only if Tasks is the first tab. The Volunteer page (`volunteer.html`) uses it so its "Open in the Sheet" buttons jump to the right row. Commit the change.
+7. **Find the Tasks tab's gid.** Click the Tasks tab and look at the address bar: `.../edit#gid=123456789`. The number after `gid=` is the gid. Put it in `data/ingest_config.json` as `"tasks_gid": "123456789"` (keep the quotes). It is `"0"` now, which is right only if Tasks is the first tab. The Volunteer page (`volunteer.html`) uses it so its "Open in the Sheet" buttons jump to the right row. Do the same for the How to tab and put its number in `"how_to_gid"`; the Volunteer page links to that tab from "How this works". Commit the change.
 
 Check it with one pull:
 

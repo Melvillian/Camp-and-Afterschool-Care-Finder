@@ -308,12 +308,13 @@ a:hover {
   margin-bottom: 0.3rem;
 }
 
-.static-section a {
+/* Buttons keep their own colours: this rule is more specific than .link-btn and would turn its text green on green. */
+.static-section a:not(.link-btn) {
   color: var(--primary);
   font-weight: 500;
 }
 
-.static-section a:hover {
+.static-section a:not(.link-btn):hover {
   text-decoration: underline;
 }
 
